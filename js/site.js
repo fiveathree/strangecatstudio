@@ -28,6 +28,35 @@
   });
   syncToggle();
 
+  // Chinese line breaking. Browsers may break a Chinese sentence after any
+  // character, which on a phone leaves stray single characters. Wrapping each
+  // clause (text up to its punctuation mark) in an inline-block makes a line
+  // break fall between clauses whenever the clause fits on one line.
+  (function keepClausesTogether() {
+    var SKIP = { SCRIPT: 1, STYLE: 1, NAV: 1, BUTTON: 1, SELECT: 1, OPTION: 1, TEXTAREA: 1, INPUT: 1, VIDEO: 1, SVG: 1 };
+    var CLAUSE = /[^，。；：！？、／]+[，。；：！？、／」）]*/g;
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+    var nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(function (node) {
+      var text = node.nodeValue;
+      if (text.trim().length < 8 || !/[，。；：！？、／]/.test(text)) return;
+      for (var el = node.parentNode; el && el !== document.body; el = el.parentNode) {
+        if (SKIP[el.tagName.toUpperCase()] || (el.classList && el.classList.contains('nw'))) return;
+      }
+      var parts = text.match(CLAUSE);
+      if (!parts || parts.length < 2) return;
+      var frag = document.createDocumentFragment();
+      parts.forEach(function (part) {
+        var span = document.createElement('span');
+        span.className = 'clause';
+        span.textContent = part;
+        frag.appendChild(span);
+      });
+      node.parentNode.replaceChild(frag, node);
+    });
+  })();
+
   // Homepage menu: transparent over the film, solid once scrolled past it.
   var header = document.querySelector('.home .site-header');
   var hero = document.querySelector('.hero');
@@ -176,9 +205,25 @@
       });
     });
     // Links such as shop.html?stone=glass open with that stone pre-selected.
-    var m = /[?&]stone=(glass|lab|cosmic)/.exec(window.location.search);
+    var m = /[?&]stone=(glass|lab|cosmic|crystal|glassware)/.exec(window.location.search);
     if (m) setFilter('stone', m[1]);
     applyFilters();
+  }
+
+  // Booking: Calendly's inline calendar, coloured to match the current theme.
+  var cal = document.getElementById('calendly');
+  if (cal) {
+    var dark = isDark();
+    var url = cal.getAttribute('data-url') + '?hide_gdpr_banner=1' +
+      '&background_color=' + (dark ? '1c1c20' : 'ffffff') +
+      '&text_color=' + (dark ? 'f3efe7' : '141b2d') +
+      '&primary_color=' + (dark ? 'eeb58a' : '5e3418');
+    cal.className = 'calendly-inline-widget';
+    cal.setAttribute('data-url', url);
+    var tag = document.createElement('script');
+    tag.src = 'https://assets.calendly.com/assets/external/widget.js';
+    tag.async = true;
+    document.body.appendChild(tag);
   }
 
   if (plating) {

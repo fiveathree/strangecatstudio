@@ -28,6 +28,7 @@
 <a href="build.html" style="display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; color: var(--ink)">自選配搭</a>
 <a href="series.html" style="display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; color: var(--ink)">宇宙玻璃</a>
 <a href="process.html" style="display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; color: var(--ink)">Bespoke 訂製</a>
+<a href="about.html" style="display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; color: var(--ink)">創作者</a>
 <a href="visit.html" style="display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; color: var(--ink); font-weight: 700; border-bottom: 2px solid var(--accent)">工作室</a>
 <a href="visit.html" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 22px; background: var(--ink); color: var(--on-ink); text-decoration: none; border-radius: 999px; font-weight: 500">預約諮詢</a>
 <button type="button" class="theme-toggle" aria-pressed="false" aria-label="切換至黑色版本" title="切換至黑色版本"><svg class="icon-moon" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path></svg><svg class="icon-sun" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg></button>
@@ -37,63 +38,17 @@
 <section style="padding: 72px 5% 40px; max-width: 1280px; margin: 0 auto; box-sizing: content-box">
 <div style="font-size: 13px; letter-spacing: 0.3em; color: var(--accent)">VISIT ・ CONTACT</div>
 <h1 style="margin: 8px 0 16px; font-family: 'Noto Serif TC', serif; font-weight: 500; font-size: 48px; letter-spacing: 0.08em">預約與聯絡</h1>
-<p style="margin: 0; max-width: 620px; color: var(--soft)">歡迎諮詢訂製、預約參觀。台南與高雄工作室皆採預約制，請先選擇日期與時段。</p>
+<p style="margin: 0; max-width: 620px; color: var(--soft)">歡迎諮詢訂製、預約體驗課與參觀。台南工作室可直接線上選時段；高雄工作室請透過官方 LINE 預約。</p>
 </section>
 
 <section style="padding: 0 5% 80px; max-width: 1280px; margin: 0 auto; box-sizing: content-box; display: flex; flex-wrap: wrap; gap: 56px">
 
-<form style="flex: 3 1 480px; min-width: 0; background: var(--card); border: 1px solid var(--line); padding: 36px; box-sizing: border-box; display: flex; flex-direction: column; gap: 22px">
-<h2 style="margin: 0; font-family: 'Noto Serif TC', serif; font-weight: 500; font-size: 28px">預約工作室</h2>
-
-<fieldset style="border: 0; padding: 0; margin: 0">
-<legend style="padding: 0; font-weight: 700; margin-bottom: 10px">工作室</legend>
-<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
-<label style="display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 16px; border: 1px solid var(--ink); border-radius: 6px"><input type="radio" name="studio" checked style="width: 20px; height: 20px; accent-color: var(--accent)"><span><span style="font-weight: 700">台南</span><br><span style="font-size: 13px; color: var(--muted)">一至日 13:30–20:00</span></span></label>
-<label style="display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 16px; border: 1px solid var(--line2); border-radius: 6px"><input type="radio" name="studio" style="width: 20px; height: 20px; accent-color: var(--accent)"><span><span style="font-weight: 700">高雄</span><br><span style="font-size: 13px; color: var(--muted)">二至六 13:30–18:30</span></span></label>
+<div id="booking" class="booking">
+<h2 class="h-serif" style="font-size: 28px; margin: 0 0 8px">預約台南工作室</h2>
+<p style="margin: 0 0 20px; color: var(--soft)">選擇日期與時段即可預約琉璃體驗課或到訪。<span class="nw">送出後請加入官方 LINE，</span><span class="nw">並提供匯款帳號末五碼。</span></p>
+<div id="calendly" data-url="https://calendly.com/strangecatshop/tn-2026"></div>
+<a href="https://calendly.com/strangecatshop/tn-2026" style="display: inline-flex; align-items: center; min-height: 44px; font-weight: 500">行事曆沒有出現？改在 Calendly 開啟</a>
 </div>
-</fieldset>
-
-<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 18px">
-<div style="display: flex; flex-direction: column; gap: 6px">
-<label for="v-type" style="font-weight: 700">預約目的</label>
-<select id="v-type" style="min-height: 48px; padding: 0 12px; font-size: 16px; border: 1px solid var(--line2); border-radius: 6px; background: var(--card); color: var(--ink)"><option>鑑賞與選購現貨</option><option>Bespoke 訂製諮詢</option><option>交收紀念元素</option><option>領取作品</option></select>
-</div>
-<div style="display: flex; flex-direction: column; gap: 6px">
-<label for="v-series" style="font-weight: 700">想了解的產品</label>
-<select id="v-series" style="min-height: 48px; padding: 0 12px; font-size: 16px; border: 1px solid var(--line2); border-radius: 6px; background: var(--card); color: var(--ink)"><option>尚未決定</option><option>玻璃鑽石</option><option>實驗室鑽石</option><option>星環串珠系列</option><option>小宇宙系列</option><option>銀河漩渦系列</option><option>蛋白石星球系列</option><option>限量系列</option><option>紀念琉璃彩鑽系列</option><option>簡約圓珠系列</option></select>
-</div>
-<div style="display: flex; flex-direction: column; gap: 6px">
-<label for="v-date" style="font-weight: 700">日期</label>
-<input id="v-date" type="date" style="min-height: 48px; padding: 0 12px; font-size: 16px; border: 1px solid var(--line2); border-radius: 6px; box-sizing: border-box; color: var(--ink)">
-</div>
-<div style="display: flex; flex-direction: column; gap: 6px">
-<label for="v-time" style="font-weight: 700">時段</label>
-<select id="v-time" style="min-height: 48px; padding: 0 12px; font-size: 16px; border: 1px solid var(--line2); border-radius: 6px; background: var(--card); color: var(--ink)"><option>13:30</option><option>14:30</option><option>15:30</option><option>16:30</option><option>17:30</option><option>18:30</option></select>
-</div>
-<div style="display: flex; flex-direction: column; gap: 6px">
-<label for="v-name" style="font-weight: 700">姓名</label>
-<input id="v-name" type="text" autocomplete="name" style="min-height: 48px; padding: 0 12px; font-size: 16px; border: 1px solid var(--line2); border-radius: 6px; box-sizing: border-box">
-</div>
-<div style="display: flex; flex-direction: column; gap: 6px">
-<label for="v-tel" style="font-weight: 700">電話</label>
-<input id="v-tel" type="tel" autocomplete="tel" style="min-height: 48px; padding: 0 12px; font-size: 16px; border: 1px solid var(--line2); border-radius: 6px; box-sizing: border-box">
-</div>
-</div>
-
-<div style="display: flex; flex-direction: column; gap: 6px">
-<label for="v-mail" style="font-weight: 700">電子郵件</label>
-<input id="v-mail" type="email" autocomplete="email" style="min-height: 48px; padding: 0 12px; font-size: 16px; border: 1px solid var(--line2); border-radius: 6px; box-sizing: border-box">
-<span style="font-size: 13px; color: var(--muted)">預約確認與提醒會寄到這個信箱</span>
-</div>
-
-<div style="display: flex; flex-direction: column; gap: 6px">
-<label for="v-note" style="font-weight: 700">想先告訴我們的事（選填）</label>
-<textarea id="v-note" rows="4" placeholder="例如：自用或送禮、對方喜歡的顏色、場合、預算，或想加入的紀念元素" style="padding: 12px; font-size: 16px; line-height: 1.6; border: 1px solid var(--line2); border-radius: 6px; box-sizing: border-box; resize: vertical"></textarea>
-</div>
-
-<button type="button" style="min-height: 56px; background: var(--ink); color: var(--on-ink); border: 0; border-radius: 999px; font-size: 17px; font-weight: 700; cursor: pointer">送出預約</button>
-<div style="font-size: 13px; color: var(--muted)">送出後會收到確認信；如需取消或改期，可從信中的連結操作。</div>
-</form>
 
 <div style="flex: 2 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 32px">
 <div style="border-top: 1px solid var(--ink); padding-top: 18px">
@@ -106,7 +61,8 @@
 <h2 style="margin: 0 0 6px; font-family: 'Noto Serif TC', serif; font-size: 26px; font-weight: 700">高雄工作室</h2>
 <div style="color: var(--soft)">高雄市中華五路939巷24號<br>捷運獅甲站走路 10 分鐘</div>
 <div style="margin-top: 10px; color: var(--soft)">星期二到星期六・國定假日休息<br>下午 1 點半到晚上 6 點半</div>
-<a href="https://www.google.com/maps/search/?api=1&amp;query=高雄市中華五路939巷24號" style="display: inline-flex; align-items: center; min-height: 44px; font-weight: 500">在 Google 地圖開啟</a>
+<a href="https://www.google.com/maps/search/?api=1&amp;query=高雄市中華五路939巷24號" style="display: inline-flex; align-items: center; min-height: 44px; font-weight: 500">在 Google 地圖開啟</a><br>
+<a href="https://lin.ee/9DuIwy4" style="display: inline-flex; align-items: center; min-height: 44px; font-weight: 500">以官方 LINE 預約高雄</a>
 </div>
 <img src="assets/bluemarble.jpg" alt="石墨模具上的藍色琉璃圓珠" style="width: 100%; height: 220px; object-fit: cover">
 </div>
@@ -119,7 +75,7 @@
 <a href="https://www.instagram.com/studiostrangecat/" style="display: flex; flex-direction: column; gap: 4px; padding: 22px 24px; background: var(--card); border: 1px solid var(--line); text-decoration: none; color: var(--ink)"><span style="font-size: 13px; letter-spacing: 0.16em; color: var(--accent)">INSTAGRAM</span><span style="font-size: 18px; font-weight: 500">@studiostrangecat</span></a>
 <a href="https://www.facebook.com/studiostrangecat" style="display: flex; flex-direction: column; gap: 4px; padding: 22px 24px; background: var(--card); border: 1px solid var(--line); text-decoration: none; color: var(--ink)"><span style="font-size: 13px; letter-spacing: 0.16em; color: var(--accent)">FACEBOOK</span><span style="font-size: 18px; font-weight: 500">奇怪貓工作室</span></a>
 <a href="https://www.threads.com/@studiostrangecat" style="display: flex; flex-direction: column; gap: 4px; padding: 22px 24px; background: var(--card); border: 1px solid var(--line); text-decoration: none; color: var(--ink)"><span style="font-size: 13px; letter-spacing: 0.16em; color: var(--accent)">THREADS</span><span style="font-size: 18px; font-weight: 500">@studiostrangecat</span></a>
-<div style="display: flex; flex-direction: column; gap: 4px; padding: 22px 24px; background: var(--card); border: 1px solid var(--line)"><span style="font-size: 13px; letter-spacing: 0.16em; color: var(--accent)">電話 ・ LINE</span><span style="font-size: 18px; font-weight: 500">[聯絡電話／LINE ID]</span></div>
+<a href="https://lin.ee/9DuIwy4" style="display: flex; flex-direction: column; gap: 4px; padding: 22px 24px; background: var(--card); border: 1px solid var(--line); text-decoration: none; color: var(--ink)"><span style="font-size: 13px; letter-spacing: 0.16em; color: var(--accent)">官方 LINE</span><span style="font-size: 18px; font-weight: 500">@735tcwvw</span></a>
 </div>
 </div>
 </section>
@@ -127,11 +83,12 @@
 <footer style="background: var(--night); color: #C9CDD8; padding: 40px 5%">
 <div style="max-width: 1280px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 16px 40px; align-items: center; justify-content: space-between; font-size: 14px">
 <span style="font-family: 'Noto Serif TC', serif; font-size: 18px; letter-spacing: 0.12em; color: #F6F2EB">奇怪貓工作室</span>
-<span>© 奇怪貓工作室 Studio Strange Cat</span>
+<span class="footer-addr"><a href="https://www.google.com/maps/search/?api=1&amp;query=台南市北區長榮路四段40號">台南市北區長榮路四段40號</a><span class="sep"> ・ </span><a href="https://www.google.com/maps/search/?api=1&amp;query=高雄市中華五路939巷24號">高雄市中華五路939巷24號</a></span>
 <span style="display: flex; flex-wrap: wrap; gap: 4px 24px">
-<a href="series.html" style="display: inline-flex; align-items: center; min-height: 44px; color: #F6F2EB; text-decoration: none">作品系列</a>
-<a href="process.html" style="display: inline-flex; align-items: center; min-height: 44px; color: #F6F2EB; text-decoration: none">訂製流程</a>
-<a href="index.html" style="display: inline-flex; align-items: center; min-height: 44px; color: #F6F2EB; text-decoration: none">回首頁</a>
+<a href="https://www.instagram.com/studiostrangecat/" style="display: inline-flex; align-items: center; min-height: 44px; color: #F6F2EB; text-decoration: none">Instagram</a>
+<a href="https://www.facebook.com/studiostrangecat" style="display: inline-flex; align-items: center; min-height: 44px; color: #F6F2EB; text-decoration: none">Facebook</a>
+<a href="https://www.threads.com/@studiostrangecat" style="display: inline-flex; align-items: center; min-height: 44px; color: #F6F2EB; text-decoration: none">Threads</a>
+<a href="https://lin.ee/9DuIwy4" style="display: inline-flex; align-items: center; min-height: 44px; color: #F6F2EB; text-decoration: none">LINE @735tcwvw</a>
 </span>
 </div>
 </footer>

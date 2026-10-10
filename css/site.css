@@ -35,6 +35,12 @@
 }
 
 html { scroll-behavior: smooth; }
+/* Line breaking for Chinese copy: avoid a lone character or punctuation mark
+   on the last line, and keep short labels in one piece. */
+body { text-wrap: pretty; line-break: strict; overflow-wrap: break-word; }
+h1, h2, h3, .h-serif, .stone-name, .occasion-title { text-wrap: balance; }
+.nw, .badge, .chip, .p-price, .stone-link, nav a { white-space: nowrap; }
+.clause { display: inline-block; }
 body { margin: 0; background: var(--bg); }
 img { max-width: 100%; }
 
@@ -306,6 +312,32 @@ button { cursor: pointer; }
 }
 .summary-cta:hover { color: var(--on-ink); opacity: 0.9; }
 
+/* Footer addresses (each opens Google Maps) */
+.footer-addr a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.footer-addr a:hover { color: #F6F2EB; }
+.footer-addr-stack { display: flex; flex-direction: column; gap: 4px; }
+.footer-addr-stack .sep { display: none; }
+
+/* Workshop list */
+.class-layout { display: flex; flex-wrap: wrap; gap: 48px; align-items: flex-start; }
+.class-list { flex: 999 1 420px; min-width: 0; list-style: none; margin: 0; padding: 0; }
+.class-list li { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 16px 0; border-top: 1px solid var(--line2); font-size: 18px; }
+.class-list li:last-child { border-bottom: 1px solid var(--line2); }
+.class-list li span:last-child { color: var(--accent); }
+.class-side { flex: 1 1 320px; max-width: 420px; background: var(--card); border: 1px solid var(--line); }
+
+/* Booking */
+.booking { flex: 3 1 480px; min-width: 0; }
+#calendly { min-width: 280px; height: 720px; border: 1px solid var(--line); background: var(--card); }
+
+/* Maker page */
+.about-hero { display: flex; flex-wrap: wrap; background: var(--night); color: #F6F2EB; }
+.about-hero .eyebrow { color: #EEB58A; }
+.about-hero p { color: #C9CDD8 !important; }
+.about-photo { flex: 1 1 480px; min-height: 380px; position: relative; }
+.about-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.about-copy { flex: 1 1 420px; box-sizing: border-box; padding: 88px 5%; display: flex; flex-direction: column; gap: 20px; justify-content: center; }
+
 @media (max-width: 640px) {
   h1 { font-size: 38px !important; }
   h2 { font-size: 28px !important; }
@@ -319,6 +351,16 @@ button { cursor: pointer; }
   .site-header nav::-webkit-scrollbar { display: none; }
   .site-header nav > * { flex-shrink: 0; }
   .summary { position: static; max-width: none; }
+  .footer-addr { display: flex; flex-direction: column; gap: 6px; }
+  /* Series cards: keep the name whole and let the price drop below it. */
+  div:has(> h2 + span) { flex-wrap: wrap; }
+  article h2 { white-space: nowrap; }
+  .footer-addr .sep { display: none; }
+  .class-side { max-width: none; }
+  .class-list li { font-size: 16px; }
+  .eyebrow, .hero-copy > div:first-child { letter-spacing: 0.18em !important; }
+  .about-copy { padding: 56px 20px; }
+  .about-copy h1 { font-size: 44px !important; }
   .shop-layout > aside { max-width: none; }
   .step-tab { flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; font-size: 14px; }
   .step-num { font-size: 22px; }
