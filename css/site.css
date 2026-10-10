@@ -2,6 +2,14 @@
    Layout lives inline in each page; colours come from these variables
    so the light and black versions share one set of markup. */
 
+/* Noto Sans TC / Noto Serif TC (Google, SIL Open Font License), cut down to
+   the characters this site uses. Rebuild with tools/build_fonts.py after
+   changing text. */
+@font-face { font-family: 'Noto Sans TC'; font-weight: 100 500; font-display: swap; src: url('../assets/fonts/sans-regular.woff') format('woff'); }
+@font-face { font-family: 'Noto Sans TC'; font-weight: 600 900; font-display: swap; src: url('../assets/fonts/sans-bold.woff') format('woff'); }
+@font-face { font-family: 'Noto Serif TC'; font-weight: 100 500; font-display: swap; src: url('../assets/fonts/serif-medium.woff') format('woff'); }
+@font-face { font-family: 'Noto Serif TC'; font-weight: 600 900; font-display: swap; src: url('../assets/fonts/serif-bold.woff') format('woff'); }
+
 :root {
   --bg: #F6F2EB;
   --bg-alt: #ECE5DA;
@@ -325,6 +333,14 @@ button { cursor: pointer; }
 .class-list li:last-child { border-bottom: 1px solid var(--line2); }
 .class-list li span:last-child { color: var(--accent); }
 .class-side { flex: 1 1 320px; max-width: 420px; background: var(--card); border: 1px solid var(--line); }
+
+/* Price rows inside series cards */
+.price-list { list-style: none; margin: 4px 0 0; padding: 0; }
+.price-list li { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 10px 0; border-top: 1px solid var(--line); }
+.price-list li span:last-child { color: var(--accent); }
+.price-list-night li { border-top-color: #2B3349; }
+.price-list-night li span:last-child { color: #F6F2EB; }
+.note-list { margin: 0; padding-left: 20px; max-width: 760px; color: var(--soft); display: flex; flex-direction: column; gap: 10px; }
 
 /* Booking */
 .booking { flex: 3 1 480px; min-width: 0; }

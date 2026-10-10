@@ -7,9 +7,7 @@
 <meta name="description" content="奇怪貓工作室：將毛孩的毛髮或骨灰以高溫存入琉璃，手工燒製獨一無二的紀念琉璃飾品。台南、高雄工作室。">
 <link rel="icon" href="assets/logo.png">
 <script>try{if(localStorage.getItem('ssc-theme')==='light')document.documentElement.removeAttribute('data-theme')}catch(e){}</script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<link rel="preload" href="assets/fonts/sans-regular.woff" as="font" type="font/woff" crossorigin>
 <link rel="stylesheet" href="css/site.css">
 </head>
 <body class="home">
@@ -36,7 +34,7 @@
 </header>
 
 <section class="hero">
-<video class="hero-video" autoplay muted loop playsinline preload="metadata" aria-hidden="true"><source src="assets/hero.mp4" type="video/mp4"></video>
+<video class="hero-video" autoplay muted loop playsinline preload="metadata" aria-hidden="true"><source src="assets/hero-mobile.mp4" type="video/mp4" media="(max-width: 640px)"><source src="assets/hero.mp4" type="video/mp4"></video>
 <div class="hero-scrim"></div>
 <div class="hero-copy">
 <div style="font-size: 13px; letter-spacing: 0.3em; color: #EEB58A">宇宙玻璃 ・ 鑽石 ・ 水晶</div>
@@ -85,7 +83,7 @@
 <span class="stone-body"><span class="badge">現貨</span><span class="stone-name">水晶鍊</span><span class="stone-note">黃髮晶、碧璽等天然水晶手鍊。</span><span class="stone-link">選購水晶鍊</span></span>
 </a>
 <a class="stone-card stone-card-premium" href="series.html">
-<img src="assets/galaxypendant.jpg" alt="銀河漩渦宇宙玻璃項鍊">
+<img src="assets/galaxypendant.jpg" alt="金砂宇宙玻璃項鍊">
 <span class="stone-body"><span class="badge badge-premium">手工 ・ 限量</span><span class="stone-name">宇宙玻璃</span><span class="stone-note">工作室最矜貴的作品。每一顆都在火焰前手工燒成，世上只有一顆。</span><span class="stone-link">探索宇宙玻璃</span></span>
 </a>
 </div>
@@ -97,43 +95,33 @@
 <div style="font-size: 13px; letter-spacing: 0.3em; color: var(--accent)">COSMIC GLASS ・ 手工宇宙玻璃</div>
 <h2 style="margin: 8px 0 0; font-family: 'Noto Serif TC', serif; font-weight: 500; font-size: 40px; letter-spacing: 0.08em">燒不出第二次的宇宙</h2>
 </div>
-<a href="series.html" style="display: inline-flex; align-items: center; min-height: 44px; font-weight: 500">查看七個系列與價格</a>
+<a href="series.html" style="display: inline-flex; align-items: center; min-height: 44px; font-weight: 500">查看五個系列與價格</a>
 </div>
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 28px">
 <a href="series.html" style="text-decoration: none; color: var(--ink); display: flex; flex-direction: column; gap: 14px">
-<img loading="lazy" src="assets/bead.jpg" alt="星環串珠" style="width: 100%; height: 300px; object-fit: cover">
-<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px"><span style="font-family: 'Noto Serif TC', serif; font-size: 22px; font-weight: 700">星環串珠系列</span><span style="font-size: 15px; color: var(--accent); white-space: nowrap">NT$3,980 起</span></div>
-<div style="font-size: 14px; color: var(--muted)">獨一無二的漩渦紋理串珠，配手鍊或項鍊</div>
-</a>
-<a href="product.html" style="text-decoration: none; color: var(--ink); display: flex; flex-direction: column; gap: 14px">
-<img loading="lazy" src="assets/moon.jpg" alt="小宇宙系列月亮太空人項鍊" style="width: 100%; height: 300px; object-fit: cover">
-<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px"><span style="font-family: 'Noto Serif TC', serif; font-size: 22px; font-weight: 700">小宇宙系列</span><span style="font-size: 15px; color: var(--accent); white-space: nowrap">NT$3,280 起</span></div>
-<div style="font-size: 14px; color: var(--muted)">8mm 小圓珠配純銀戒指與墜飾</div>
+<img loading="lazy" src="assets/bead.jpg" alt="串珠系列配純銀手鍊" style="width: 100%; height: 300px; object-fit: cover">
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px"><span style="font-family: 'Noto Serif TC', serif; font-size: 22px; font-weight: 700">串珠系列</span><span style="font-size: 15px; color: var(--accent); white-space: nowrap">NT$5,800 起</span></div>
+<div style="font-size: 14px; color: var(--muted)">漩渦紋理串珠，配項鍊或手鍊</div>
 </a>
 <a href="series.html" style="text-decoration: none; color: var(--ink); display: flex; flex-direction: column; gap: 14px">
-<img loading="lazy" src="assets/galaxypendant.jpg" alt="銀河漩渦琉璃項鍊" style="width: 100%; height: 300px; object-fit: cover">
-<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px"><span style="font-family: 'Noto Serif TC', serif; font-size: 22px; font-weight: 700">銀河漩渦系列</span><span style="font-size: 15px; color: var(--accent); white-space: nowrap">NT$4,980 起</span></div>
-<div style="font-size: 14px; color: var(--muted)">刻畫你心中的流星，金砂紋路的琉璃項鍊</div>
+<img loading="lazy" src="assets/galaxypendant.jpg" alt="金砂宇宙項鍊" style="width: 100%; height: 300px; object-fit: cover">
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px"><span style="font-family: 'Noto Serif TC', serif; font-size: 22px; font-weight: 700">金砂宇宙系列</span><span style="font-size: 15px; color: var(--accent); white-space: nowrap">NT$7,800 起</span></div>
+<div style="font-size: 14px; color: var(--muted)">金砂紋路的宇宙玻璃項鍊與擺設</div>
 </a>
 <a href="series.html" style="text-decoration: none; color: var(--ink); display: flex; flex-direction: column; gap: 14px">
-<img loading="lazy" src="assets/opal.jpg" alt="蛋白石星球" style="width: 100%; height: 300px; object-fit: cover">
-<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px"><span style="font-family: 'Noto Serif TC', serif; font-size: 22px; font-weight: 700">蛋白石星球系列</span><span style="font-size: 15px; color: var(--accent); white-space: nowrap">NT$8,800 起</span></div>
-<div style="font-size: 14px; color: var(--muted)">純銀蒸燻法配天然蛋白石，可改為舍利花</div>
+<img loading="lazy" src="assets/moon.jpg" alt="金砂小宇宙月亮太空人項鍊" style="width: 100%; height: 300px; object-fit: cover">
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px"><span style="font-family: 'Noto Serif TC', serif; font-size: 22px; font-weight: 700">金砂小宇宙系列</span><span style="font-size: 15px; color: var(--accent); white-space: nowrap">NT$4,880 起</span></div>
+<div style="font-size: 14px; color: var(--muted)">8mm 小圓珠配純銀造型墜子</div>
 </a>
 <a href="series.html" style="text-decoration: none; color: var(--ink); display: flex; flex-direction: column; gap: 14px">
-<img loading="lazy" src="assets/snow.jpg" alt="限量系列銀閃雪花" style="width: 100%; height: 300px; object-fit: cover">
-<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px"><span style="font-family: 'Noto Serif TC', serif; font-size: 22px; font-weight: 700">限量系列</span><span style="font-size: 15px; color: var(--accent); white-space: nowrap">NT$4,980 起</span></div>
-<div style="font-size: 14px; color: var(--muted)">銀閃雪花、彩虹月光，約一個月完成</div>
+<img loading="lazy" src="assets/opalrow.jpg" alt="三顆蛋白石星球" style="width: 100%; height: 300px; object-fit: cover">
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px"><span style="font-family: 'Noto Serif TC', serif; font-size: 22px; font-weight: 700">蛋白石星球系列</span><span style="font-size: 15px; color: var(--accent); white-space: nowrap">NT$12,800 起</span></div>
+<div style="font-size: 14px; color: var(--muted)">純銀蒸燻法配天然蛋白石</div>
 </a>
 <a href="series.html" style="text-decoration: none; color: var(--ink); display: flex; flex-direction: column; gap: 14px">
-<img loading="lazy" src="assets/diamond.jpg" alt="紀念琉璃彩鑽項鍊" style="width: 100%; height: 300px; object-fit: cover">
-<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px"><span style="font-family: 'Noto Serif TC', serif; font-size: 22px; font-weight: 700">紀念琉璃彩鑽系列</span><span style="font-size: 15px; color: var(--accent); white-space: nowrap">NT$8,800 起</span></div>
+<img loading="lazy" src="assets/diamond.jpg" alt="藍色紀念琉璃彩鑽項鍊" style="width: 100%; height: 300px; object-fit: cover">
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px"><span style="font-family: 'Noto Serif TC', serif; font-size: 22px; font-weight: 700">紀念琉璃彩鑽系列</span><span style="font-size: 15px; color: var(--accent); white-space: nowrap">NT$9,800 起</span></div>
 <div style="font-size: 14px; color: var(--muted)">像鑽石一樣珍藏，化作閃亮的星星</div>
-</a>
-<a href="series.html" style="text-decoration: none; color: var(--ink); display: flex; flex-direction: column; gap: 14px">
-<img loading="lazy" src="assets/simple.jpg" alt="簡約圓珠項鍊" style="width: 100%; height: 300px; object-fit: cover">
-<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px"><span style="font-family: 'Noto Serif TC', serif; font-size: 22px; font-weight: 700">簡約圓珠系列</span><span style="font-size: 15px; color: var(--accent); white-space: nowrap">NT$4,280 起</span></div>
-<div style="font-size: 14px; color: var(--muted)">最純粹、最簡單的陪伴</div>
 </a>
 <a href="process.html" style="text-decoration: none; background: var(--accent-bg); color: #F6F2EB; display: flex; flex-direction: column; justify-content: space-between; gap: 24px; padding: 32px; min-height: 300px; box-sizing: border-box">
 <span style="font-family: 'Noto Serif TC', serif; font-size: 26px; line-height: 1.5">想把一段故事燒進去？<br>從 Bespoke 訂製開始。</span>
@@ -148,13 +136,13 @@
 <div style="font-size: 13px; letter-spacing: 0.3em; color: var(--accent)">NEW ・ 貓與星球</div>
 <h2 style="margin: 0; font-family: 'Noto Serif TC', serif; font-weight: 500; font-size: 40px; line-height: 1.4; letter-spacing: 0.06em">牠還是那麼愛玩，<br>只是球變成了星球。</h2>
 <div style="font-family: 'Noto Serif TC', serif; font-size: 24px; letter-spacing: 0.3em; color: var(--accent)">燃。續愛</div>
-<p style="margin: 0; color: var(--soft); max-width: 420px">小宇宙系列的貓咪款：純銀小貓伸手撥弄一顆宇宙玻璃圓珠。可以選現成配色，也可以訂製時加入牠的毛髮或骨灰。</p>
+<p style="margin: 0; color: var(--soft); max-width: 420px">金砂小宇宙系列的貓咪款：純銀小貓伸手撥弄一顆宇宙玻璃圓珠。可以選現成配色，也可以訂製時加入牠的毛髮或骨灰。</p>
 <a href="product.html" style="align-self: flex-start; display: inline-flex; align-items: center; min-height: 50px; padding: 0 28px; background: var(--ink); color: var(--on-ink); text-decoration: none; border-radius: 999px; font-weight: 500">選購貓咪款</a>
 </div>
 <div style="flex: 2 1 560px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px">
 <a href="product.html" style="text-decoration: none; color: var(--ink); display: flex; flex-direction: column; gap: 10px; grid-column: span 2">
 <img loading="lazy" src="assets/catring.jpg" alt="純銀貓咪戒指，貓咪撥弄琉璃圓珠" style="width: 100%; height: 380px; object-fit: cover">
-<span style="display: flex; justify-content: space-between; gap: 12px"><span style="font-weight: 500">貓咪純銀戒指</span><span style="color: var(--accent)">NT$3,980</span></span>
+<span style="display: flex; justify-content: space-between; gap: 12px"><span style="font-weight: 500">貓咪純銀戒指</span><span style="color: var(--accent)">[售價待確認]</span></span>
 </a>
 <div style="display: flex; flex-direction: column; gap: 20px">
 <a href="product.html" style="text-decoration: none; color: var(--ink); display: flex; flex-direction: column; gap: 10px">
@@ -198,7 +186,7 @@
 <div><dt style="font-size: 13px; color: #A4AABB">玻璃原材</dt><dd style="margin: 0; font-family: 'Noto Serif TC', serif; font-size: 20px">義大利／美國</dd></div>
 <div><dt style="font-size: 13px; color: #A4AABB">燒製溫度</dt><dd style="margin: 0; font-family: 'Noto Serif TC', serif; font-size: 20px">1600 度</dd></div>
 <div><dt style="font-size: 13px; color: #A4AABB">金屬配件</dt><dd style="margin: 0; font-family: 'Noto Serif TC', serif; font-size: 20px">純銀，可升級電鍍 18K</dd></div>
-<div><dt style="font-size: 13px; color: #A4AABB">可選顏色</dt><dd style="margin: 0; font-family: 'Noto Serif TC', serif; font-size: 20px"><span class="nw">不透明 31 色</span><span class="nw">・透明 26 色</span></dd></div>
+<div><dt style="font-size: 13px; color: #A4AABB">可選顏色</dt><dd style="margin: 0; font-family: 'Noto Serif TC', serif; font-size: 20px">透明色系 26 色</dd></div>
 </dl>
 </div>
 </section>
@@ -242,7 +230,7 @@
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 28px">
 <div style="border-top: 1px solid var(--ink); padding-top: 16px">
 <div style="font-family: 'Noto Serif TC', serif; font-size: 22px; font-weight: 700">台南工作室</div>
-<div><a href="https://www.google.com/maps/search/?api=1&amp;query=台南市北區長榮路四段40號">台南市北區長榮路四段40號</a></div>
+<div><a href="https://www.google.com/maps/search/?api=1&amp;query=台南市北區長榮路四段40號">台南市北區長榮路四段40號</a></div><div style="color: var(--soft)">台南火車站開車 8 分鐘</div>
 <div style="margin-top: 10px; font-size: 14px; color: var(--soft)">星期一至日・全年無休<br>13:30 – 20:00</div>
 </div>
 <div style="border-top: 1px solid var(--ink); padding-top: 16px">
