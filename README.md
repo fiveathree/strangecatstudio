@@ -12,7 +12,8 @@
 | `series.html` | 宇宙玻璃五個手工系列：各款價格、規格、製作時間、加購項目（依 2026/03 訂購表單） |
 | `product.html` | 商品頁示範（小貓咪純銀戒指），選項會即時更新價格 |
 | `process.html` | Bespoke 訂製流程、紀念元素準備方式、色票、製作時間 |
-| `visit.html` | 台南工作室 Calendly 預約、台南／高雄工作室資訊、官方 LINE 與社群連結 |
+| `visit.html` | 預約（自建預約系統；未啟用前顯示台南 Calendly）、台南／高雄工作室資訊、官方 LINE 與社群連結 |
+| `admin.html` | 工作室專用的預約管理頁（需管理密碼） |
 | `about.html` | 創作者介紹：Ben Yuen |
 
 ## 結構
@@ -35,9 +36,31 @@
 - 現貨頁的商品清單寫在 `shop.html` 內，尚未接商品資料庫；價格未齊，所以暫時沒有價格篩選與排序。
 - 商品頁與流程頁的色票是示意色，並非型錄透明色系 26 色的實際編號。
 - 「加入訂製單」未接後端；會員、購物車、金流尚未實作。
-- 預約暫用 Calendly（只有台南場），高雄以官方 LINE 預約；自建預約系統尚未實作。
+- 自建預約系統的程式已完成，但要部署後端並在 `js/config.js` 填入網址才會啟用（見下方）；未啟用前仍用 Calendly。
 - 水晶鍊、實驗室鑽石、創作者相片與自述為待補內容。
 - 貓咪純銀戒指：2026/03 訂購表單已劃掉戒指款，售價待確認。
+
+## 預約系統
+
+後端是 `booking/` 內的 Cloudflare Worker 加 D1 資料庫；前端是 `js/booking.js`（顧客）與 `admin.html`（工作室）。
+
+- 台南、高雄分開排期；體驗課與到訪鑑賞共用同一個行事曆與名額。
+- 營業時段、每節長度、每節名額都在 `booking/worker.js` 最上方的 `CONFIG`。目前為：台南每日 13:30–21:00、高雄週二至週六 13:30–19:30、每節 90 分鐘、每節 4 位、最早可約明天、最遠 60 天。
+- 體驗課預約後為「待匯款」，顧客回報匯款帳號末五碼後變「已回報」，工作室在管理頁按「確認」。到訪鑑賞不用付款，直接確認。
+- 國定假日等休息日在管理頁新增。
+
+部署（在 `booking/` 資料夾內執行，需要 Node.js 與 Cloudflare 帳號）：
+
+```
+npx wrangler d1 create strangecat-booking        # 把輸出的 database_id 貼到 wrangler.toml
+npx wrangler d1 execute strangecat-booking --remote --file=schema.sql
+npx wrangler secret put ADMIN_TOKEN              # 設定管理頁密碼
+npx wrangler deploy                              # 會顯示 Worker 網址
+```
+
+然後把 Worker 網址填入 `js/config.js` 的 `SSC_API`，匯款資料填入 `SSC_BANK_INFO`。換了網域要同步改 `wrangler.toml` 的 `ALLOWED_ORIGINS`。
+
+本機測試：`node --experimental-sqlite booking/test.mjs`（跑檢查）或加 `serve`（在 8787 埠開一個測試用 API）。
 
 ## 在 GitHub Pages 上線
 

@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="zh-Hant" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>預約管理｜奇怪貓工作室</title>
+<link rel="icon" href="assets/logo.png">
+<link rel="stylesheet" href="css/site.css">
+</head>
+<body>
+<div class="wrap admin" style="padding-top: 40px; padding-bottom: 80px; color: var(--ink); font-family: 'Noto Sans TC', sans-serif; line-height: 1.7">
+<div class="eyebrow">STUDIO ONLY</div>
+<h1 class="h-serif" style="font-size: 36px; margin: 6px 0 24px">預約管理</h1>
+
+<form id="login" class="admin-bar">
+<label for="token">管理密碼</label>
+<input id="token" type="password" autocomplete="current-password" required>
+<button type="submit" class="chip" aria-pressed="true">登入</button>
+<p id="login-error" class="bk-error" role="alert" hidden></p>
+</form>
+
+<div id="panel" hidden>
+<div class="admin-bar">
+<button type="button" class="chip" id="reload">重新整理</button>
+<button type="button" class="chip" id="logout">登出</button>
+<span id="summary" style="color: var(--muted)"></span>
+</div>
+
+<div id="list"></div>
+
+<h2 class="h-serif" style="font-size: 26px; margin: 48px 0 12px">休息日</h2>
+<form id="closure" class="admin-bar">
+<select id="c-studio" aria-label="工作室"><option value="tn">台南</option><option value="kh">高雄</option></select>
+<input id="c-date" type="date" required aria-label="日期">
+<input id="c-reason" type="text" placeholder="原因（例如：國定假日）" maxlength="40" aria-label="原因">
+<button type="submit" class="chip" aria-pressed="true">新增休息日</button>
+</form>
+<ul id="closures" class="admin-closures"></ul>
+</div>
+</div>
+
+<script src="js/config.js"></script>
+<script>
+(function () {
+  var API = window.SSC_API;
+  var STUDIO = { tn: '台南', kh: '高雄' };
+  var TYPE = { 'class': '體驗課', visit: '到訪' };
+  var STATUS = { pending: '待匯款', reported: '已回報末五碼', confirmed: '已確認', cancelled: '已取消' };
+  var WEEK = ['日', '一', '二', '三', '四', '五', '六'];
+  var token = '';
+  try { token = sessionStorage.getItem('ssc-admin') || ''; } catch (e) {}
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  function api(method, path, body) {
+    return fetch(API + path, {
+      method: method,
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: body ? JSON.stringify(body) : undefined,
+    }).then(function (res) {
+      return res.json().then(function (data) {
+        if (!res.ok) { var err = new Error(data.error || '發生錯誤'); err.status = res.status; throw err; }
+        return data;
+      });
+    });
+  }
+
+  function cell(tag, text) {
+    var td = document.createElement(tag);
+    td.textContent = text == null ? '' : text;
+    return td;
+  }
+
+  function action(label, booking, status) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.textContent = label;
+    b.addEventListener('click', function () {
+      api('PATCH', '/api/admin/bookings/' + booking.id, { status: status }).then(load);
+    });
+    return b;
+  }
+
+  function render(data) {
+    var list = $('list');
+    list.textContent = '';
+    var active = data.bookings.filter(function (b) { return b.status !== 'cancelled'; });
+    $('summary').textContent = '今天起共 ' + active.length + ' 筆有效預約，' + data.bookings.filter(function (b) { return b.status === 'reported'; }).length + ' 筆待核對匯款';
+    var byDate = {};
+    data.bookings.forEach(function (b) { (byDate[b.date] = byDate[b.date] || []).push(b); });
+    Object.keys(byDate).sort().forEach(function (date) {
+      var h = document.createElement('h2');
+      h.className = 'h-serif admin-date';
+      h.textContent = date + '（週' + WEEK[new Date(date + 'T00:00:00Z').getUTCDay()] + '）';
+      list.appendChild(h);
+      var wrap = document.createElement('div');
+      wrap.className = 'admin-table';
+      var table = document.createElement('table');
+      var head = document.createElement('tr');
+      ['時段', '工作室', '項目', '人數', '姓名', '電話', 'LINE', '備註', '末五碼', '編號', '狀態', ''].forEach(function (t) { head.appendChild(cell('th', t)); });
+      table.appendChild(head);
+      byDate[date].forEach(function (b) {
+        var tr = document.createElement('tr');
+        if (b.status === 'cancelled') tr.className = 'is-cancelled';
+        [b.time, STUDIO[b.studio], TYPE[b.type], b.people, b.name, b.phone, b.line_id, b.note, b.pay_last5, b.code, STATUS[b.status]].forEach(function (v) { tr.appendChild(cell('td', v)); });
+        var acts = document.createElement('td');
+        acts.className = 'admin-actions';
+        if (b.status !== 'confirmed' && b.status !== 'cancelled') acts.appendChild(action('確認', b, 'confirmed'));
+        if (b.status !== 'cancelled') acts.appendChild(action('取消', b, 'cancelled'));
+        else acts.appendChild(action('恢復', b, 'pending'));
+        tr.appendChild(acts);
+        table.appendChild(tr);
+      });
+      wrap.appendChild(table);
+      list.appendChild(wrap);
+    });
+    if (!data.bookings.length) list.textContent = '目前沒有預約。';
+
+    var ul = $('closures');
+    ul.textContent = '';
+    data.closures.forEach(function (c) {
+      var li = document.createElement('li');
+      li.appendChild(document.createTextNode(c.date + '　' + STUDIO[c.studio] + (c.reason ? '　' + c.reason : '') + '　'));
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip';
+      b.textContent = '移除';
+      b.addEventListener('click', function () { api('DELETE', '/api/admin/closures', { studio: c.studio, date: c.date }).then(load); });
+      li.appendChild(b);
+      ul.appendChild(li);
+    });
+  }
+
+  function load() {
+    return api('GET', '/api/admin/bookings').then(function (data) {
+      $('login').hidden = true;
+      $('panel').hidden = false;
+      try { sessionStorage.setItem('ssc-admin', token); } catch (e) {}
+      render(data);
+    }).catch(function (err) {
+      $('login').hidden = false;
+      $('panel').hidden = true;
+      var box = $('login-error');
+      box.textContent = err.status === 401 ? '密碼不正確' : err.message;
+      box.hidden = false;
+    });
+  }
+
+  $('login').addEventListener('submit', function (e) {
+    e.preventDefault();
+    token = $('token').value;
+    load();
+  });
+  $('reload').addEventListener('click', load);
+  $('logout').addEventListener('click', function () {
+    token = '';
+    try { sessionStorage.removeItem('ssc-admin'); } catch (e) {}
+    $('panel').hidden = true;
+    $('login').hidden = false;
+  });
+  $('closure').addEventListener('submit', function (e) {
+    e.preventDefault();
+    api('POST', '/api/admin/closures', { studio: $('c-studio').value, date: $('c-date').value, reason: $('c-reason').value }).then(load);
+  });
+
+  if (!API) {
+    var box = $('login-error');
+    box.textContent = '尚未設定預約 API（js/config.js 的 SSC_API）。';
+    box.hidden = false;
+  } else if (token) {
+    load();
+  }
+})();
+</script>
+</body>
+</html>

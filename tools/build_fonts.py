@@ -93,6 +93,14 @@ def build(name, source, chars):
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     buckets = asyncio.run(collect_text())
+    # Text that scripts add after load (booking widget, admin page) is not in
+    # the page yet when it is scanned, so take it from the script sources.
+    scripted = set()
+    for src in list((ROOT / 'js').glob('*.js')) + [ROOT / 'admin.html']:
+        scripted.update(ch for ch in src.read_text(encoding='utf-8') if ord(ch) > 0x2E7F)
+    buckets['sans-regular'] |= scripted
+    buckets['sans-bold'] |= scripted
+    buckets['serif-medium'] |= scripted
     for name, source in FACES.items():
         build(name, source, buckets[name])
 

@@ -211,8 +211,9 @@
   }
 
   // Booking: Calendly's inline calendar, coloured to match the current theme.
+  // Only used until the site's own booking API is switched on in js/config.js.
   var cal = document.getElementById('calendly');
-  if (cal) {
+  if (cal && !window.SSC_API) {
     var dark = isDark();
     var url = cal.getAttribute('data-url') + '?hide_gdpr_banner=1' +
       '&background_color=' + (dark ? '1c1c20' : 'ffffff') +

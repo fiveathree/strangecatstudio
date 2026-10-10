@@ -36,29 +36,32 @@
 <section style="padding: 72px 5% 40px; max-width: 1280px; margin: 0 auto; box-sizing: content-box">
 <div style="font-size: 13px; letter-spacing: 0.3em; color: var(--accent)">VISIT ・ CONTACT</div>
 <h1 style="margin: 8px 0 16px; font-family: 'Noto Serif TC', serif; font-weight: 500; font-size: 48px; letter-spacing: 0.08em">預約與聯絡</h1>
-<p style="margin: 0; max-width: 620px; color: var(--soft)">歡迎諮詢訂製、預約體驗課與參觀。台南工作室可直接線上選時段；高雄工作室請透過官方 LINE 預約。</p>
+<p style="margin: 0; max-width: 620px; color: var(--soft)">歡迎諮詢訂製、預約體驗課與參觀。兩間工作室皆採預約制，請先預約再到訪。</p>
 </section>
 
 <section style="padding: 0 5% 80px; max-width: 1280px; margin: 0 auto; box-sizing: content-box; display: flex; flex-wrap: wrap; gap: 56px">
 
 <div id="booking" class="booking">
-<h2 class="h-serif" style="font-size: 28px; margin: 0 0 8px">預約台南工作室</h2>
-<p style="margin: 0 0 20px; color: var(--soft)">選擇日期與時段即可預約琉璃體驗課或到訪。<span class="nw">送出後請加入官方 LINE，</span><span class="nw">並提供匯款帳號末五碼。</span></p>
+<h2 class="h-serif" style="font-size: 28px; margin: 0 0 20px">預約工作室</h2>
+<div id="booking-app" class="bk" hidden></div>
+<div id="booking-fallback">
+<p style="margin: 0 0 20px; color: var(--soft)">台南工作室可在下方選擇日期與時段，預約琉璃體驗課或到訪；高雄工作室請以官方 LINE 預約。<span class="nw">送出後請加入官方 LINE，</span><span class="nw">並提供匯款帳號末五碼。</span></p>
 <div id="calendly" data-url="https://calendly.com/strangecatshop/tn-2026"></div>
 <a href="https://calendly.com/strangecatshop/tn-2026" style="display: inline-flex; align-items: center; min-height: 44px; font-weight: 500">行事曆沒有出現？改在 Calendly 開啟</a>
+</div>
 </div>
 
 <div style="flex: 2 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 32px">
 <div style="border-top: 1px solid var(--ink); padding-top: 18px">
 <h2 style="margin: 0 0 6px; font-family: 'Noto Serif TC', serif; font-size: 26px; font-weight: 700">台南工作室</h2>
 <div style="color: var(--soft)">台南市北區長榮路四段40號<br>台南火車站開車 8 分鐘</div>
-<div style="margin-top: 10px; color: var(--soft)">星期一到星期日・全年無休<br>下午 1 點半到晚上 8 點</div>
+<div style="margin-top: 10px; color: var(--soft)">星期一到星期日・全年無休<br>下午 1 點半到晚上 9 點</div>
 <a href="https://www.google.com/maps/search/?api=1&amp;query=台南市北區長榮路四段40號" style="display: inline-flex; align-items: center; min-height: 44px; font-weight: 500">在 Google 地圖開啟</a>
 </div>
 <div style="border-top: 1px solid var(--ink); padding-top: 18px">
 <h2 style="margin: 0 0 6px; font-family: 'Noto Serif TC', serif; font-size: 26px; font-weight: 700">高雄工作室</h2>
 <div style="color: var(--soft)">高雄市中華五路939巷24號<br>捷運獅甲站走路 10 分鐘</div>
-<div style="margin-top: 10px; color: var(--soft)">星期二到星期六・國定假日休息<br>下午 1 點半到晚上 6 點半</div>
+<div style="margin-top: 10px; color: var(--soft)">星期二到星期六・國定假日休息<br>下午 1 點半到晚上 7 點半</div>
 <a href="https://www.google.com/maps/search/?api=1&amp;query=高雄市中華五路939巷24號" style="display: inline-flex; align-items: center; min-height: 44px; font-weight: 500">在 Google 地圖開啟</a><br>
 <a href="https://lin.ee/9DuIwy4" style="display: inline-flex; align-items: center; min-height: 44px; font-weight: 500">以官方 LINE 預約高雄</a>
 </div>
@@ -92,6 +95,8 @@
 </footer>
 
 </div>
+<script src="js/config.js"></script>
 <script src="js/site.js"></script>
+<script src="js/booking.js"></script>
 </body>
 </html>
