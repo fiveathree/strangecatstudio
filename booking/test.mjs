@@ -53,7 +53,7 @@ if (process.argv[2] === 'serve') {
     });
     const out = await worker.fetch(request, env);
     res.writeHead(out.status, Object.fromEntries(out.headers));
-    res.end(await out.text());
+    res.end(Buffer.from(await out.arrayBuffer()));
   }).listen(8787, () => console.log('booking API on http://localhost:8787 (admin token: test-token)'));
 } else {
   assert.deepEqual(slotTimes('tn'), ['13:30', '15:00', '16:30', '18:00', '19:30']);
@@ -138,6 +138,36 @@ if (process.argv[2] === 'serve') {
   assert.equal(r.data.notify_emails, 'boss@example.com,staff@example.com');
   r = await call('GET', '/api/admin/bookings', null, 'test-token');
   assert.equal(r.data.settings.notify_emails, 'boss@example.com,staff@example.com');
+
+  // ---- Shop catalogue ----
+  const item = { name: '玻璃鑽石戒指', stone: 'glass', cat: 'ring', supply: 'stock', note: '6–7mm', price: 2980, priceFrom: false, stock: 2, status: 'active', sort: 1, link: '' };
+  assert.equal((await call('POST', '/api/admin/products', item)).status, 401);
+  assert.equal((await call('POST', '/api/admin/products', { ...item, stone: 'gold' }, 'test-token')).status, 400);
+  assert.equal((await call('POST', '/api/admin/products', { ...item, link: 'javascript:alert(1)' }, 'test-token')).status, 400);
+  r = await call('POST', '/api/admin/products', item, 'test-token');
+  assert.equal(r.status, 201);
+  const pid = r.data.product.id;
+  await call('POST', '/api/admin/products', { ...item, name: '隱藏款', status: 'hidden' }, 'test-token');
+  r = await call('GET', '/api/products');
+  assert.deepEqual(r.data.products.map((p) => p.name), ['玻璃鑽石戒指'], 'hidden products stay out of the shop');
+  assert.equal((await call('GET', '/api/admin/products', null, 'test-token')).data.products.length, 2);
+
+  // A photo upload, then attach it; a later save without a new photo keeps it.
+  const photo = await worker.fetch(new Request('http://local/api/admin/images', { method: 'POST', headers: { 'Content-Type': 'image/jpeg', Authorization: 'Bearer test-token' }, body: new Uint8Array([255, 216, 255, 1, 2, 3]) }), env);
+  assert.equal(photo.status, 201);
+  const photoId = (await photo.json()).id;
+  r = await call('PUT', `/api/admin/products/${pid}`, { ...item, imageId: photoId }, 'test-token');
+  assert.match(r.data.product.image, /\/api\/images\/\d+$/);
+  r = await call('PUT', `/api/admin/products/${pid}`, { ...item, stock: 0 }, 'test-token');
+  assert.match(r.data.product.image, /\/api\/images\/\d+$/, 'photo kept');
+  assert.equal(r.data.product.status, 'soldout', 'no stock left reads as sold out');
+  const served = await worker.fetch(new Request('http://local/api/images/' + photoId), env);
+  assert.equal(served.headers.get('Content-Type'), 'image/jpeg');
+  assert.equal(new Uint8Array(await served.arrayBuffer()).length, 6);
+  const text = await worker.fetch(new Request('http://local/api/admin/images', { method: 'POST', headers: { 'Content-Type': 'text/html', Authorization: 'Bearer test-token' }, body: '<b>' }), env);
+  assert.equal(text.status, 400);
+  assert.equal((await call('DELETE', `/api/admin/products/${pid}`, null, 'test-token')).status, 200);
+  assert.equal((await worker.fetch(new Request('http://local/api/images/' + photoId), env)).status, 404, 'its photo goes with it');
 
   console.log('all booking checks passed');
 }

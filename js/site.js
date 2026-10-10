@@ -204,6 +204,54 @@
         applyFilters();
       });
     });
+    // The catalogue comes from the studio's back office. The cards written into the
+    // page stay as they are if the API cannot be reached.
+    var STONE_NAME = { glass: '玻璃鑽石', lab: '實驗室鑽石', cosmic: '宇宙玻璃', crystal: '水晶鍊', glassware: '玻璃飾品' };
+    var span = function (cls, text) {
+      var el = document.createElement('span');
+      el.className = cls;
+      el.textContent = text;
+      return el;
+    };
+    var productCard = function (p) {
+      var a = document.createElement('a');
+      var soldout = p.status === 'soldout';
+      a.className = 'p-card' + (soldout ? ' is-soldout' : '');
+      a.href = p.link || 'visit.html';
+      if (/^https:/.test(a.getAttribute('href'))) { a.target = '_blank'; a.rel = 'noopener'; }
+      a.setAttribute('data-stone', p.stone);
+      a.setAttribute('data-cat', p.cat);
+      a.setAttribute('data-supply', p.supply);
+      if (p.image) {
+        var img = document.createElement('img');
+        img.loading = 'lazy';
+        img.src = p.image;
+        img.alt = p.name;
+        a.appendChild(img);
+      } else {
+        a.appendChild(span('ph', '[產品相片]'));
+      }
+      var meta = span('p-meta', '');
+      meta.appendChild(soldout ? span('badge badge-soldout', '已售完')
+        : span('badge' + (p.supply === 'made' ? ' badge-premium' : ''), p.supply === 'made' ? '手工訂製' : '現貨'));
+      meta.appendChild(span('p-stone', STONE_NAME[p.stone] || ''));
+      a.appendChild(meta);
+      a.appendChild(span('p-name', p.name));
+      if (p.note) a.appendChild(span('p-note', p.note));
+      a.appendChild(span('p-price', p.price == null ? '價錢請洽詢' : 'NT$' + Number(p.price).toLocaleString('en-US') + (p.priceFrom ? ' 起' : '')));
+      return a;
+    };
+    if (window.SSC_API) {
+      fetch(window.SSC_API + '/api/products').then(function (res) {
+        if (!res.ok) throw new Error('catalogue unavailable');
+        return res.json();
+      }).then(function (data) {
+        if (!data.products || !data.products.length) return;
+        grid.textContent = '';
+        data.products.forEach(function (p) { grid.appendChild(productCard(p)); });
+        applyFilters();
+      }).catch(function () {});
+    }
     // Links such as shop.html?stone=glass open with that stone pre-selected.
     var m = /[?&]stone=(glass|lab|cosmic|crystal|glassware)/.exec(window.location.search);
     if (m) setFilter('stone', m[1]);

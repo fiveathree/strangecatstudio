@@ -451,3 +451,24 @@ button { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
 }
+
+/* ---- Admin: tabs and products ---- */
+.admin-tabs { display: flex; gap: 8px; margin: 0 0 28px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.admin-form { padding: 24px; margin: 0 0 28px; background: var(--card); border: 1px solid var(--line2); display: flex; flex-direction: column; gap: 18px; }
+.admin-form select { min-height: 48px; padding: 0 12px; font-size: 16px; box-sizing: border-box; border: 1px solid var(--line2); border-radius: 6px; }
+.admin-check { display: flex; align-items: center; gap: 10px; min-height: 48px; align-self: end; }
+.admin-check input { width: 22px; height: 22px; }
+.admin-photo { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+.admin-photo img { width: 120px; height: 120px; object-fit: cover; }
+.admin-photo input { font-size: 16px; max-width: 100%; }
+.admin-danger { margin-left: auto; border-color: #E0694F; color: #E0694F; }
+.admin-products { display: flex; flex-direction: column; }
+.admin-product { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.admin-product.is-hidden .admin-thumb, .admin-product.is-hidden .admin-product-info { opacity: 0.5; }
+.admin-thumb { flex: 0 0 64px; width: 64px; height: 64px; object-fit: cover; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 11px; color: var(--muted); background: var(--card); }
+.admin-product-info { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; font-size: 14px; color: var(--soft); }
+.admin-product-info strong { font-size: 16px; color: var(--ink); font-weight: 500; }
+.admin-flag { color: #E0694F; }
+/* ---- Shop: sold-out cards ---- */
+.p-card.is-soldout img, .p-card.is-soldout .ph { opacity: 0.45; }
+.badge-soldout { border-color: var(--muted); color: var(--muted); }

@@ -37,3 +37,29 @@ CREATE TABLE IF NOT EXISTS settings (
   key    TEXT PRIMARY KEY,
   value  TEXT
 );
+
+-- Shop catalogue, edited from the admin page.
+CREATE TABLE IF NOT EXISTS products (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT NOT NULL,
+  stone       TEXT NOT NULL,              -- glass | lab | cosmic | crystal | glassware
+  cat         TEXT NOT NULL,              -- ring | necklace | earrings | bracelet | other
+  supply      TEXT NOT NULL,              -- stock (ready to ship) | made (made to order)
+  note        TEXT,                       -- one line of specs
+  price       INTEGER,                    -- NT$; NULL = ask
+  price_from  INTEGER NOT NULL DEFAULT 0, -- 1 shows the price as "起"
+  stock       INTEGER,                    -- NULL = not counted
+  status      TEXT NOT NULL DEFAULT 'active', -- active | soldout | hidden
+  sort        INTEGER NOT NULL DEFAULT 0,
+  link        TEXT,                       -- where the card goes; empty = booking page
+  image_id    INTEGER,                    -- photo uploaded from the admin page
+  image_url   TEXT,                       -- or a file already in the site's assets
+  created_at  TEXT NOT NULL
+);
+
+-- Uploaded product photos (resized in the browser before upload).
+CREATE TABLE IF NOT EXISTS images (
+  id    INTEGER PRIMARY KEY AUTOINCREMENT,
+  type  TEXT NOT NULL,
+  data  BLOB NOT NULL
+);

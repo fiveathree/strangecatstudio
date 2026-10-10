@@ -10,6 +10,10 @@
 //   POST  /api/admin/closures            { studio, date, reason }
 //   DELETE /api/admin/closures           { studio, date }
 //   PUT   /api/admin/settings            { notify_emails }
+//   GET/POST /api/admin/products, PUT/DELETE /api/admin/products/:id
+//   POST  /api/admin/images              (photo bytes) -> { id, url }
+// Public catalogue:
+//   GET  /api/products, GET /api/images/:id
 
 // ---- Settings the studio is likely to change -------------------------------
 export const CONFIG = {
@@ -33,6 +37,14 @@ export const CONFIG = {
 
 const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
 const STATUSES = ['pending', 'reported', 'confirmed', 'cancelled'];
+
+// Shop catalogue
+const STONES = ['glass', 'lab', 'cosmic', 'crystal', 'glassware'];
+const CATS = ['ring', 'necklace', 'earrings', 'bracelet', 'other'];
+const SUPPLIES = ['stock', 'made'];
+const PRODUCT_STATUSES = ['active', 'soldout', 'hidden'];
+const MAX_IMAGE_BYTES = 700 * 1024;
+const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 function minutes(hhmm) {
   const [h, m] = hhmm.split(':').map(Number);
@@ -226,6 +238,52 @@ async function reportPayment(body, env, ctx) {
   return [{ ok: true }, 200];
 }
 
+/** Turns a database row into what the pages use. */
+function productOut(row, origin) {
+  return {
+    id: row.id, name: row.name, stone: row.stone, cat: row.cat, supply: row.supply, note: row.note || '',
+    price: row.price, priceFrom: Boolean(row.price_from), stock: row.stock,
+    // Counted stock that has run out reads as sold out without anyone changing the status.
+    status: row.status === 'active' && row.stock === 0 ? 'soldout' : row.status,
+    sort: row.sort, link: row.link || '',
+    image: row.image_id ? origin + '/api/images/' + row.image_id : row.image_url || '',
+  };
+}
+
+/** Checks a product sent from the admin page; returns [fields] or [null, problem]. */
+function productIn(body) {
+  const name = clean(body.name, 60);
+  if (!name) return [null, '請填寫貨品名稱'];
+  if (!STONES.includes(body.stone)) return [null, '請選擇主石'];
+  if (!CATS.includes(body.cat)) return [null, '請選擇類別'];
+  if (!SUPPLIES.includes(body.supply)) return [null, '請選擇供應方式'];
+  if (!PRODUCT_STATUSES.includes(body.status)) return [null, '狀態不正確'];
+  const whole = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
+  const price = whole(body.price);
+  const stock = whole(body.stock);
+  if (price !== null && (!Number.isInteger(price) || price < 0 || price > 9999999)) return [null, '價錢不正確'];
+  if (stock !== null && (!Number.isInteger(stock) || stock < 0 || stock > 9999)) return [null, '庫存不正確'];
+  const link = clean(body.link, 300);
+  if (link && !/^(https:\/\/|[\w-]+\.html)/.test(link)) return [null, '連結需以 https:// 開頭，或是本站的頁面檔名'];
+  const imageId = whole(body.imageId);
+  return [[name, body.stone, body.cat, body.supply, clean(body.note, 120), price, body.priceFrom ? 1 : 0, stock, body.status,
+    Number.isInteger(Number(body.sort)) ? Number(body.sort) : 0, link, imageId]];
+}
+
+async function listProducts(env, origin, includeHidden) {
+  const rows = await env.DB.prepare(
+    `SELECT * FROM products ${includeHidden ? '' : "WHERE status != 'hidden'"} ORDER BY sort, id`
+  ).all();
+  return rows.results.map((r) => productOut(r, origin));
+}
+
+async function getImage(id, env, headers) {
+  const row = await env.DB.prepare('SELECT type, data FROM images WHERE id = ?').bind(Number(id)).first();
+  if (!row) return json({ error: 'Not found' }, 404, headers);
+  // An uploaded photo never changes (a new upload gets a new id), so browsers may keep it.
+  return new Response(new Uint8Array(row.data), { headers: { ...headers, 'Content-Type': row.type, 'Cache-Control': 'public, max-age=31536000, immutable' } });
+}
+
 function isAdmin(request, env) {
   const token = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
   return Boolean(env.ADMIN_TOKEN) && token === env.ADMIN_TOKEN;
@@ -249,6 +307,51 @@ async function admin(request, url, env, ctx) {
     const result = await env.DB.prepare('UPDATE bookings SET status = ? WHERE id = ?').bind(body.status, Number(match[1])).run();
     if (!result.meta.changes) return [{ error: '找不到這筆預約' }, 404];
     notify(env, ctx, 'status', await env.DB.prepare('SELECT * FROM bookings WHERE id = ?').bind(Number(match[1])).first());
+    return [{ ok: true }, 200];
+  }
+
+  if (path === '/api/admin/products' && request.method === 'GET') {
+    return [{ products: await listProducts(env, url.origin, true) }, 200];
+  }
+
+  if (path === '/api/admin/images' && request.method === 'POST') {
+    const type = (request.headers.get('Content-Type') || '').split(';')[0];
+    if (!IMAGE_TYPES.includes(type)) return [{ error: '相片格式需為 JPG、PNG 或 WebP' }, 400];
+    const data = new Uint8Array(await request.arrayBuffer());
+    if (!data.length || data.length > MAX_IMAGE_BYTES) return [{ error: '相片檔案太大' }, 400];
+    const saved = await env.DB.prepare('INSERT INTO images (type, data) VALUES (?, ?) RETURNING id').bind(type, data).first();
+    return [{ id: saved.id, url: url.origin + '/api/images/' + saved.id }, 201];
+  }
+
+  const productMatch = path.match(/^\/api\/admin\/products(?:\/(\d+))?$/);
+  if (productMatch && (request.method === 'POST' || request.method === 'PUT')) {
+    const body = await request.json().catch(() => ({}));
+    const [fields, problem] = productIn(body);
+    if (!fields) return [{ error: problem }, 400];
+    if (request.method === 'POST' && !productMatch[1]) {
+      const saved = await env.DB.prepare(
+        `INSERT INTO products (name, stone, cat, supply, note, price, price_from, stock, status, sort, link, image_id, image_url, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?) RETURNING *`
+      ).bind(...fields, new Date().toISOString()).first();
+      return [{ product: productOut(saved, url.origin) }, 201];
+    }
+    if (request.method === 'PUT' && productMatch[1]) {
+      // A product keeps its current photo unless a new one was uploaded with this save.
+      const before = await env.DB.prepare('SELECT image_id FROM products WHERE id = ?').bind(Number(productMatch[1])).first();
+      const saved = await env.DB.prepare(
+        `UPDATE products SET name = ?, stone = ?, cat = ?, supply = ?, note = ?, price = ?, price_from = ?, stock = ?, status = ?, sort = ?, link = ?,
+           image_id = COALESCE(?, image_id) WHERE id = ? RETURNING *`
+      ).bind(...fields, Number(productMatch[1])).first();
+      if (!saved) return [{ error: '找不到這件貨品' }, 404];
+      // The photo it replaced is no longer used by anything.
+      if (before && before.image_id && before.image_id !== saved.image_id) await env.DB.prepare('DELETE FROM images WHERE id = ?').bind(before.image_id).run();
+      return [{ product: productOut(saved, url.origin) }, 200];
+    }
+  }
+  if (productMatch && productMatch[1] && request.method === 'DELETE') {
+    const gone = await env.DB.prepare('DELETE FROM products WHERE id = ? RETURNING image_id').bind(Number(productMatch[1])).first();
+    if (!gone) return [{ error: '找不到這件貨品' }, 404];
+    if (gone.image_id) await env.DB.prepare('DELETE FROM images WHERE id = ?').bind(gone.image_id).run();
     return [{ ok: true }, 200];
   }
 
@@ -289,6 +392,10 @@ export default {
         result = await createBooking(await request.json().catch(() => ({})), env, ctx);
       } else if (url.pathname === '/api/bookings/payment' && request.method === 'POST') {
         result = await reportPayment(await request.json().catch(() => ({})), env, ctx);
+      } else if (url.pathname === '/api/products' && request.method === 'GET') {
+        return json({ products: await listProducts(env, url.origin, false) }, 200, { ...headers, 'Cache-Control': 'public, max-age=60' });
+      } else if (/^\/api\/images\/\d+$/.test(url.pathname) && request.method === 'GET') {
+        return await getImage(url.pathname.split('/').pop(), env, headers);
       } else if (url.pathname.startsWith('/api/admin/')) {
         result = await admin(request, url, env, ctx);
       } else {
