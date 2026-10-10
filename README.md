@@ -49,13 +49,12 @@
 - 體驗課預約後為「待匯款」，顧客回報匯款帳號末五碼後變「已回報」，工作室在管理頁按「確認」。到訪鑑賞不用付款，直接確認。
 - 國定假日等休息日在管理頁新增。
 
-部署（在 `booking/` 資料夾內執行，需要 Node.js 與 Cloudflare 帳號）：
+D1 資料庫 `strangecat-booking` 與資料表已建立，id 已寫在 `wrangler.toml`。部署 Worker（在 `booking/` 資料夾內執行，需要 Node.js）：
 
 ```
-npx wrangler d1 create strangecat-booking        # 把輸出的 database_id 貼到 wrangler.toml
-npx wrangler d1 execute strangecat-booking --remote --file=schema.sql
-npx wrangler secret put ADMIN_TOKEN              # 設定管理頁密碼
+npx wrangler login
 npx wrangler deploy                              # 會顯示 Worker 網址
+npx wrangler secret put ADMIN_TOKEN              # 設定管理頁密碼
 ```
 
 然後把 Worker 網址填入 `js/config.js` 的 `SSC_API`，匯款資料填入 `SSC_BANK_INFO`。換了網域要同步改 `wrangler.toml` 的 `ALLOWED_ORIGINS`。

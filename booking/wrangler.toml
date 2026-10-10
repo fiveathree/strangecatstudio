@@ -9,7 +9,7 @@ ALLOWED_ORIGINS = "https://fiveathree.github.io"
 [[d1_databases]]
 binding = "DB"
 database_name = "strangecat-booking"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "4f93fbf5-4201-48a0-b103-7fd622e7a38e"
 
 # The studio password for admin.html is a secret, not a variable:
 #   npx wrangler secret put ADMIN_TOKEN
