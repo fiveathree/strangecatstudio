@@ -13,7 +13,7 @@
 | `product.html` | 商品頁示範（小貓咪純銀戒指），選項會即時更新價格 |
 | `process.html` | Bespoke 訂製流程、紀念元素準備方式、色票、製作時間 |
 | `visit.html` | 台南工作室 Calendly 預約、台南／高雄工作室資訊、官方 LINE 與社群連結 |
-| `about.html` | 創作者介紹：Beny Yuen |
+| `about.html` | 創作者介紹：Ben Yuen |
 
 ## 結構
 
