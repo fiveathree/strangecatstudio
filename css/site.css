@@ -384,6 +384,8 @@ button { cursor: pointer; }
 .bk-pay input { width: 140px; letter-spacing: 0.2em; }
 .bk-pay .bk-submit { min-height: 48px; font-size: 16px; }
 .bk-line-link { font-weight: 500; }
+.bk-cal { align-self: flex-start; display: inline-flex; align-items: center; min-height: 48px; padding: 0 22px; border: 1px solid var(--ink); border-radius: 999px; color: var(--ink); text-decoration: none; font-weight: 500; margin-top: 6px; }
+.admin-cal { display: inline-flex; align-items: center; text-decoration: none; }
 
 /* Studio admin page */
 .admin-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 20px; }

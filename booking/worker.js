@@ -162,7 +162,7 @@ async function createBooking(body, env) {
   ).bind(code, studio, body.date, body.time, type, people, name, phone, clean(body.line, 40), clean(body.note, 300), status, new Date().toISOString(), CONFIG.capacity).run();
   if (!result.meta.changes) return [{ error: '這個時段剛剛額滿了，請改選其他時段' }, 409];
 
-  return [{ code, studio, studioName: CONFIG.studios[studio].name, date: body.date, time: body.time, type, typeName: CONFIG.types[type], people, status }, 201];
+  return [{ code, studio, studioName: CONFIG.studios[studio].name, date: body.date, time: body.time, type, typeName: CONFIG.types[type], people, status, slotMinutes: CONFIG.slotMinutes }, 201];
 }
 
 async function reportPayment(body, env) {

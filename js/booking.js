@@ -211,6 +211,12 @@
     } else {
       parts.push(el('p', { text: '到訪無須預付。如需改期或取消，請以官方 LINE 告訴我們。' }));
     }
+    parts.push(el('a', {
+      'class': 'bk-cal', target: '_blank', rel: 'noopener',
+      href: window.sscCalendarLink('奇怪貓工作室 ' + booking.typeName, booking.date, booking.time, booking.slotMinutes || 90,
+        window.SSC_ADDRESS[booking.studio], '預約編號 ' + booking.code + '，' + booking.people + ' 位。官方 LINE ' + window.SSC_LINE_ID),
+      text: '加入 Google 日曆',
+    }));
     parts.push(lineLink);
     root.appendChild(el('div', { 'class': 'bk-done' }, parts));
     root.scrollIntoView({ block: 'start' });

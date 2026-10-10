@@ -110,6 +110,16 @@
         if (b.status !== 'confirmed' && b.status !== 'cancelled') acts.appendChild(action('確認', b, 'confirmed'));
         if (b.status !== 'cancelled') acts.appendChild(action('取消', b, 'cancelled'));
         else acts.appendChild(action('恢復', b, 'pending'));
+        if (b.status !== 'cancelled') {
+          var cal = document.createElement('a');
+          cal.className = 'chip admin-cal';
+          cal.target = '_blank';
+          cal.rel = 'noopener';
+          cal.textContent = '加入日曆';
+          cal.href = window.sscCalendarLink(STUDIO[b.studio] + ' ' + TYPE[b.type] + '｜' + b.name + ' ' + b.people + ' 位', b.date, b.time, data.config.slotMinutes,
+            window.SSC_ADDRESS[b.studio], '電話 ' + b.phone + (b.line_id ? '\nLINE ' + b.line_id : '') + (b.note ? '\n備註 ' + b.note : '') + '\n編號 ' + b.code + '（' + STATUS[b.status] + '）');
+          acts.appendChild(cal);
+        }
         tr.appendChild(acts);
         table.appendChild(tr);
       });
