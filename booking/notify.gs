@@ -8,7 +8,8 @@
  *   3. optionally pushes a LINE message.
  *
  * Settings live in Project Settings → Script properties (all optional):
- *   STUDIO_EMAIL  where to send the emails (default: the account running this script)
+ *   STUDIO_EMAIL  where to send the emails when none are set on the admin page
+ *                 (default: the account running this script)
  *   CALENDAR_ID   calendar to write to (default: your main calendar; "off" to skip)
  *   NOTIFY_KEY    if set, the Worker's NOTIFY_URL must end with ?key=<this value>
  *   LINE_TOKEN    Messaging API channel access token  } both needed
@@ -42,7 +43,9 @@ function doPost(e) {
 
   var errors = [];
   attempt(errors, 'email', function () {
-    var to = props.getProperty('STUDIO_EMAIL') || Session.getEffectiveUser().getEmail();
+    // Recipients set on the admin page win; otherwise the script property, otherwise yourself.
+    var to = (data.emails && data.emails.length ? data.emails.join(',') : '') ||
+      props.getProperty('STUDIO_EMAIL') || Session.getEffectiveUser().getEmail();
     MailApp.sendEmail(to, '【奇怪貓預約】' + heading + '：' + summary, lines.join('\n'));
   });
   attempt(errors, 'calendar', function () {

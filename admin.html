@@ -29,6 +29,14 @@
 
 <div id="list"></div>
 
+<h2 class="h-serif" style="font-size: 26px; margin: 48px 0 12px">通知收件人</h2>
+<form id="notify" class="admin-bar">
+<input id="n-emails" type="text" placeholder="例如 boss@example.com, staff@example.com" aria-label="接收預約通知的 Email" style="flex: 1 1 320px">
+<button type="submit" class="chip" aria-pressed="true">儲存</button>
+<span id="n-status" role="status" style="color: var(--muted)"></span>
+</form>
+<p style="margin: -8px 0 0; color: var(--muted); font-size: 14px">新預約、回報末五碼、狀態變更都會寄到這些 Email，最多 5 個，用逗號分隔。留空則寄給設定通知程式的帳號。</p>
+
 <h2 class="h-serif" style="font-size: 26px; margin: 48px 0 12px">休息日</h2>
 <form id="closure" class="admin-bar">
 <select id="c-studio" aria-label="工作室"><option value="tn">台南</option><option value="kh">高雄</option></select>
@@ -128,6 +136,8 @@
     });
     if (!data.bookings.length) list.textContent = '目前沒有預約。';
 
+    if (document.activeElement !== $('n-emails')) $('n-emails').value = (data.settings && data.settings.notify_emails || '').split(',').join(', ');
+
     var ul = $('closures');
     ul.textContent = '';
     data.closures.forEach(function (c) {
@@ -169,6 +179,15 @@
     try { sessionStorage.removeItem('ssc-admin'); } catch (e) {}
     $('panel').hidden = true;
     $('login').hidden = false;
+  });
+  $('notify').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var status = $('n-status');
+    status.textContent = '儲存中…';
+    api('PUT', '/api/admin/settings', { notify_emails: $('n-emails').value }).then(function (res) {
+      $('n-emails').value = res.notify_emails.split(',').join(', ');
+      status.textContent = res.notify_emails ? '已儲存' : '已清空，會寄給預設帳號';
+    }).catch(function (err) { status.textContent = err.message; });
   });
   $('closure').addEventListener('submit', function (e) {
     e.preventDefault();

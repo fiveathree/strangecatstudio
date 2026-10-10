@@ -30,3 +30,10 @@ CREATE TABLE IF NOT EXISTS closures (
   reason  TEXT,
   PRIMARY KEY (studio, date)
 );
+
+-- Things the studio can change from the admin page.
+--   notify_emails: comma-separated addresses that receive booking emails
+CREATE TABLE IF NOT EXISTS settings (
+  key    TEXT PRIMARY KEY,
+  value  TEXT
+);

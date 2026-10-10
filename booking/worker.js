@@ -9,6 +9,7 @@
 //   PATCH /api/admin/bookings/:id        { status }
 //   POST  /api/admin/closures            { studio, date, reason }
 //   DELETE /api/admin/closures           { studio, date }
+//   PUT   /api/admin/settings            { notify_emails }
 
 // ---- Settings the studio is likely to change -------------------------------
 export const CONFIG = {
@@ -85,16 +86,23 @@ function closedForOtherStudio(studio) {
   return '當日於' + blockers(studio).map((s) => CONFIG.studios[s].name).join('、') + '服務';
 }
 
+async function getSetting(env, key) {
+  const row = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first();
+  return row ? row.value : '';
+}
+
 /** Tells the studio's notifier (a Google Apps Script web app) about a change. */
 function notify(env, ctx, event, booking) {
   if (!env.NOTIFY_URL || !booking) return;
-  const payload = {
-    event, // 'booked' | 'payment' | 'status'
-    booking: { ...booking, studioName: CONFIG.studios[booking.studio].name, typeName: CONFIG.types[booking.type] },
-    slotMinutes: CONFIG.slotMinutes,
-  };
-  const send = fetch(env.NOTIFY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-    .catch((err) => console.error('notify failed', err));
+  const send = getSetting(env, 'notify_emails').then((emails) => {
+    const payload = {
+      event, // 'booked' | 'payment' | 'status'
+      booking: { ...booking, studioName: CONFIG.studios[booking.studio].name, typeName: CONFIG.types[booking.type] },
+      slotMinutes: CONFIG.slotMinutes,
+      emails: emails ? emails.split(',') : [], // recipients chosen on the admin page
+    };
+    return fetch(env.NOTIFY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  }).catch((err) => console.error('notify failed', err));
   // Let the reply to the customer go out without waiting for the notifier.
   if (ctx && ctx.waitUntil) ctx.waitUntil(send);
 }
@@ -105,7 +113,7 @@ function cors(env, request) {
   const allow = allowed.includes('*') ? '*' : allowed.includes(origin) ? origin : allowed[0];
   return {
     'Access-Control-Allow-Origin': allow,
-    'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type,Authorization',
     'Vary': 'Origin',
   };
@@ -231,7 +239,7 @@ async function admin(request, url, env, ctx) {
     const from = isDate(url.searchParams.get('from')) ? url.searchParams.get('from') : taipeiToday();
     const rows = await env.DB.prepare('SELECT * FROM bookings WHERE date >= ? ORDER BY date, time, studio, id').bind(from).all();
     const closed = await env.DB.prepare('SELECT * FROM closures WHERE date >= ? ORDER BY date, studio').bind(from).all();
-    return [{ bookings: rows.results, closures: closed.results, config: CONFIG }, 200];
+    return [{ bookings: rows.results, closures: closed.results, config: CONFIG, settings: { notify_emails: await getSetting(env, 'notify_emails') } }, 200];
   }
 
   const match = path.match(/^\/api\/admin\/bookings\/(\d+)$/);
@@ -242,6 +250,16 @@ async function admin(request, url, env, ctx) {
     if (!result.meta.changes) return [{ error: '找不到這筆預約' }, 404];
     notify(env, ctx, 'status', await env.DB.prepare('SELECT * FROM bookings WHERE id = ?').bind(Number(match[1])).first());
     return [{ ok: true }, 200];
+  }
+
+  if (path === '/api/admin/settings' && request.method === 'PUT') {
+    const body = await request.json().catch(() => ({}));
+    const emails = clean(body.notify_emails, 300).split(/[\s,;，；]+/).filter(Boolean);
+    if (emails.length > 5) return [{ error: '最多 5 個收件人' }, 400];
+    const bad = emails.find((e) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
+    if (bad) return [{ error: 'Email 格式不正確：' + bad }, 400];
+    await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('notify_emails', ?)").bind(emails.join(',')).run();
+    return [{ ok: true, notify_emails: emails.join(',') }, 200];
   }
 
   if (path === '/api/admin/closures' && (request.method === 'POST' || request.method === 'DELETE')) {

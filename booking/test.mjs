@@ -131,5 +131,13 @@ if (process.argv[2] === 'serve') {
   r = await call('GET', `/api/slots?studio=tn&from=${kh}&days=1`);
   assert.equal(r.data.days[0].closed, null);
 
+  // Notification recipients.
+  assert.equal((await call('PUT', '/api/admin/settings', { notify_emails: 'a@b.co' })).status, 401);
+  assert.equal((await call('PUT', '/api/admin/settings', { notify_emails: 'not-an-email' }, 'test-token')).status, 400);
+  r = await call('PUT', '/api/admin/settings', { notify_emails: 'boss@example.com， staff@example.com' }, 'test-token');
+  assert.equal(r.data.notify_emails, 'boss@example.com,staff@example.com');
+  r = await call('GET', '/api/admin/bookings', null, 'test-token');
+  assert.equal(r.data.settings.notify_emails, 'boss@example.com,staff@example.com');
+
   console.log('all booking checks passed');
 }
