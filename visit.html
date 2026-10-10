@@ -1,12 +1,12 @@
 <!doctype html>
-<html lang="zh-Hant">
+<html lang="zh-Hant" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>預約與聯絡｜奇怪貓工作室</title>
 <meta name="description" content="預約參觀奇怪貓工作室台南、高雄工作室，或透過 Instagram、Facebook、Threads 聯絡我們。">
 <link rel="icon" href="assets/logo.png">
-<script>try{var t=localStorage.getItem('ssc-theme');if(t==='dark')document.documentElement.setAttribute('data-theme','dark')}catch(e){}</script>
+<script>try{if(localStorage.getItem('ssc-theme')==='light')document.documentElement.removeAttribute('data-theme')}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;500;700&family=Noto+Sans+TC:wght@400;500;700&display=swap">
@@ -15,7 +15,7 @@
 <body>
 <div style="background: var(--bg); color: var(--ink); font-family: 'Noto Sans TC', sans-serif; font-size: 16px; line-height: 1.7">
 
-<header style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 32px; padding: 14px 5%; border-bottom: 1px solid var(--line)">
+<header class="site-header" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 32px; padding: 14px 5%; border-bottom: 1px solid var(--line)">
 <a href="index.html" style="display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--ink)">
 <img src="assets/logo.png" alt="" style="width: 54px; height: 54px; border-radius: 50%; object-fit: cover">
 <span style="display: flex; flex-direction: column; line-height: 1.3">

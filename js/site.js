@@ -28,6 +28,19 @@
   });
   syncToggle();
 
+  // Homepage menu: transparent over the film, solid once scrolled past it.
+  var header = document.querySelector('.home .site-header');
+  var hero = document.querySelector('.hero');
+  if (header && hero) {
+    var syncHeader = function () {
+      var past = window.scrollY > hero.offsetHeight - header.offsetHeight;
+      header.classList.toggle('is-solid', past);
+    };
+    window.addEventListener('scroll', syncHeader, { passive: true });
+    window.addEventListener('resize', syncHeader);
+    syncHeader();
+  }
+
   // Homepage video. It opens on black, so the still photo is only used when
   // the film cannot or should not play: reduced-motion, or a load failure.
   var heroVideo = document.querySelector('.hero-video');

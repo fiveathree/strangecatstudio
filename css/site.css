@@ -67,15 +67,41 @@ button { cursor: pointer; }
 :root[data-theme="dark"] .theme-toggle .icon-sun { display: block; }
 :root[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
 
-/* Homepage opening: full-bleed video with the headline over it.
-   Until assets/hero.mp4 exists the poster image is shown instead. */
+/* Menu bar. Stays frozen at the top of every page. On the homepage it
+   starts out transparent, laid over the film, and turns solid once the
+   visitor has scrolled past the film. */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--bg);
+  transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+.home .site-header {
+  position: fixed;
+  left: 0;
+  right: 0;
+}
+.home .site-header:not(.is-solid) {
+  /* Re-point the colour tokens so the same markup reads on top of the film. */
+  --ink: #F6F2EB;
+  --on-ink: #0E0E10;
+  --muted: #D5D8E0;
+  --line: transparent;
+  --line2: rgba(246, 242, 235, 0.45);
+  background: transparent;
+}
+
+/* Homepage opening: the film fills the whole screen. */
 .hero {
   position: relative;
   display: flex;
   align-items: flex-end;
-  min-height: min(86vh, 860px);
+  height: 100vh;
+  height: 100svh;
+  min-height: 560px;
   overflow: hidden;
-  background: #05070D;
+  background: #000000;
   color: #F6F2EB;
 }
 .hero-video {
@@ -88,8 +114,9 @@ button { cursor: pointer; }
 .hero-scrim {
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, rgba(5, 7, 13, 0.82) 0%, rgba(5, 7, 13, 0.45) 45%, rgba(5, 7, 13, 0) 75%),
-              linear-gradient(0deg, rgba(5, 7, 13, 0.6) 0%, rgba(5, 7, 13, 0) 40%);
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0) 22%),
+              linear-gradient(90deg, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0.3) 45%, rgba(0, 0, 0, 0) 75%),
+              linear-gradient(0deg, rgba(0, 0, 0, 0.6) 0%, rgba(0, 0, 0, 0) 40%);
 }
 .hero-copy {
   position: relative;
@@ -123,8 +150,14 @@ button { cursor: pointer; }
   h1 { font-size: 38px !important; }
   h2 { font-size: 28px !important; }
   /* On phones the headline sits over the picture, so darken from the bottom. */
-  .hero-scrim { background: linear-gradient(0deg, rgba(5, 7, 13, 0.88) 0%, rgba(5, 7, 13, 0.5) 55%, rgba(5, 7, 13, 0) 100%); }
+  .hero-scrim { background: linear-gradient(180deg, rgba(0, 0, 0, 0.6) 0%, rgba(0, 0, 0, 0) 25%), linear-gradient(0deg, rgba(0, 0, 0, 0.88) 0%, rgba(0, 0, 0, 0.5) 55%, rgba(0, 0, 0, 0) 100%); }
   .hero-copy { padding: 96px 20px 48px; }
+  /* Keep the frozen menu to two short rows: links scroll sideways instead of wrapping. */
+  .site-header { padding: 8px 16px !important; gap: 0 !important; }
+  .site-header img { width: 40px !important; height: 40px !important; }
+  .site-header nav { flex-wrap: nowrap !important; gap: 0 20px !important; width: 100%; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+  .site-header nav::-webkit-scrollbar { display: none; }
+  .site-header nav > * { flex-shrink: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
