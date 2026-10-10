@@ -28,11 +28,17 @@
   });
   syncToggle();
 
-  // Homepage video: respect reduced-motion by leaving the poster in place.
+  // Homepage video. It opens on black, so the still photo is only used when
+  // the film cannot or should not play: reduced-motion, or a load failure.
   var heroVideo = document.querySelector('.hero-video');
-  if (heroVideo && window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    heroVideo.removeAttribute('autoplay');
-    heroVideo.pause();
+  if (heroVideo) {
+    var showStill = function () { heroVideo.poster = 'assets/galaxy.jpg'; };
+    if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      heroVideo.removeAttribute('autoplay');
+      heroVideo.pause();
+      showStill();
+    }
+    heroVideo.addEventListener('error', showStill, true);
   }
 
   // Product page: single-choice option groups, swatches and the plating add-on.
