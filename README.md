@@ -36,7 +36,6 @@
 - 現貨頁的商品清單寫在 `shop.html` 內，尚未接商品資料庫；價格未齊，所以暫時沒有價格篩選與排序。
 - 商品頁與流程頁的色票是示意色，並非型錄透明色系 26 色的實際編號。
 - 「加入訂製單」未接後端；會員、購物車、金流尚未實作。
-- 自建預約系統的程式已完成，但要部署後端並在 `js/config.js` 填入網址才會啟用（見下方）；未啟用前仍用 Calendly。
 - 水晶鍊、實驗室鑽石、創作者相片與自述為待補內容。
 - 貓咪純銀戒指：2026/03 訂購表單已劃掉戒指款，售價待確認。
 
@@ -49,15 +48,11 @@
 - 體驗課預約後為「待匯款」，顧客回報匯款帳號末五碼後變「已回報」，工作室在管理頁按「確認」。到訪鑑賞不用付款，直接確認。
 - 國定假日等休息日在管理頁新增。
 
-D1 資料庫 `strangecat-booking` 與資料表已建立，id 已寫在 `wrangler.toml`。部署 Worker（在 `booking/` 資料夾內執行，需要 Node.js）：
+已部署在 `https://strangecat-booking.fiveathree.workers.dev`，並已填入 `js/config.js`。Cloudflare 已連接這個 GitHub repo（根目錄 `/booking`），之後每次 push 到 `main` 都會自動重新部署 Worker。
 
-```
-npx wrangler login
-npx wrangler deploy                              # 會顯示 Worker 網址
-npx wrangler secret put ADMIN_TOKEN              # 設定管理頁密碼
-```
+管理頁密碼是 Worker 的 Secret `ADMIN_TOKEN`：Cloudflare 後台 → Workers & Pages → strangecat-booking → Settings → Variables and Secrets → Add → Type 選 Secret。
 
-然後把 Worker 網址填入 `js/config.js` 的 `SSC_API`，匯款資料填入 `SSC_BANK_INFO`。換了網域要同步改 `wrangler.toml` 的 `ALLOWED_ORIGINS`。
+匯款資料填在 `js/config.js` 的 `SSC_BANK_INFO`。換了網域要同步改 `booking/wrangler.toml` 的 `ALLOWED_ORIGINS`。
 
 本機測試：`node --experimental-sqlite booking/test.mjs`（跑檢查）或加 `serve`（在 8787 埠開一個測試用 API）。
 
