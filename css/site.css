@@ -49,20 +49,58 @@ input, select, textarea, button { font-family: inherit; }
 input, select, textarea { background: var(--card); color: var(--ink); }
 button { cursor: pointer; }
 
-/* Light / black switch in the header */
+/* Light / black switch in the header: icon only */
 .theme-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  min-height: 44px;
-  padding: 0 16px;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
   background: transparent;
   color: var(--ink);
   border: 1px solid var(--line2);
-  border-radius: 999px;
-  font-size: 14px;
+  border-radius: 50%;
 }
 .theme-toggle:hover { border-color: var(--ink); }
+.theme-toggle .icon-sun { display: none; }
+:root[data-theme="dark"] .theme-toggle .icon-sun { display: block; }
+:root[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
+
+/* Homepage opening: full-bleed video with the headline over it.
+   Until assets/hero.mp4 exists the poster image is shown instead. */
+.hero {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  min-height: min(86vh, 860px);
+  overflow: hidden;
+  background: #05070D;
+  color: #F6F2EB;
+}
+.hero-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.hero-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(5, 7, 13, 0.82) 0%, rgba(5, 7, 13, 0.45) 45%, rgba(5, 7, 13, 0) 75%),
+              linear-gradient(0deg, rgba(5, 7, 13, 0.6) 0%, rgba(5, 7, 13, 0) 40%);
+}
+.hero-copy {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 760px;
+  padding: 120px 5% 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
 
 /* Product options */
 .opt {
@@ -84,6 +122,9 @@ button { cursor: pointer; }
 @media (max-width: 640px) {
   h1 { font-size: 38px !important; }
   h2 { font-size: 28px !important; }
+  /* On phones the headline sits over the picture, so darken from the bottom. */
+  .hero-scrim { background: linear-gradient(0deg, rgba(5, 7, 13, 0.88) 0%, rgba(5, 7, 13, 0.5) 55%, rgba(5, 7, 13, 0) 100%); }
+  .hero-copy { padding: 96px 20px 48px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

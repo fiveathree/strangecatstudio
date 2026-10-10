@@ -9,9 +9,10 @@
   function syncToggle() {
     var dark = isDark();
     document.querySelectorAll('.theme-toggle').forEach(function (btn) {
+      var label = dark ? '切換至淺色版本' : '切換至黑色版本';
       btn.setAttribute('aria-pressed', dark ? 'true' : 'false');
-      var label = btn.querySelector('.theme-toggle-label');
-      if (label) label.textContent = dark ? '淺色版' : '黑色版';
+      btn.setAttribute('aria-label', label);
+      btn.setAttribute('title', label);
     });
   }
 
@@ -26,6 +27,13 @@
     });
   });
   syncToggle();
+
+  // Homepage video: respect reduced-motion by leaving the poster in place.
+  var heroVideo = document.querySelector('.hero-video');
+  if (heroVideo && window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    heroVideo.removeAttribute('autoplay');
+    heroVideo.pause();
+  }
 
   // Product page: single-choice option groups, swatches and the plating add-on.
   var BASE_PRICE = 3980;
