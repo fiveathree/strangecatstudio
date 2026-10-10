@@ -1,0 +1,91 @@
+/* 奇怪貓工作室 — theme tokens and page basics.
+   Layout lives inline in each page; colours come from these variables
+   so the light and black versions share one set of markup. */
+
+:root {
+  --bg: #F6F2EB;
+  --bg-alt: #ECE5DA;
+  --card: #FFFFFF;
+  --ink: #141B2D;
+  --on-ink: #F6F2EB;
+  --soft: #454957;
+  --muted: #5B5F6B;
+  --line: #DDD5C8;
+  --line2: #B9AE9C;
+  --accent: #5E3418;
+  --accent-bg: #5E3418;
+  --night: #0E1424;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0E0E10;
+  --bg-alt: #17171A;
+  --card: #1C1C20;
+  --ink: #F3EFE7;
+  --on-ink: #0E0E10;
+  --soft: #C9C9CF;
+  --muted: #A3A3AB;
+  --line: #2C2C31;
+  --line2: #55555C;
+  --accent: #EEB58A;
+  --accent-bg: #3A2110;
+  --night: #000000;
+  color-scheme: dark;
+}
+
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); }
+img { max-width: 100%; }
+
+a { color: var(--accent); }
+a:hover { color: var(--ink); }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+input, select, textarea, button { font-family: inherit; }
+input, select, textarea { background: var(--card); color: var(--ink); }
+button { cursor: pointer; }
+
+/* Light / black switch in the header */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--line2);
+  border-radius: 999px;
+  font-size: 14px;
+}
+.theme-toggle:hover { border-color: var(--ink); }
+
+/* Product options */
+.opt {
+  background: var(--card);
+  color: var(--ink);
+  border: 1px solid var(--line2);
+}
+.opt[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--on-ink);
+  border-color: var(--ink);
+}
+.swatch {
+  border: 2px solid var(--bg);
+  box-shadow: 0 0 0 2px var(--line2);
+}
+.swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--ink); }
+
+@media (max-width: 640px) {
+  h1 { font-size: 38px !important; }
+  h2 { font-size: 28px !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
