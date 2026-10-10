@@ -47,6 +47,8 @@
 - 營業時段、每節長度、每節名額都在 `booking/worker.js` 最上方的 `CONFIG`。目前為：台南每日 13:30–21:00、高雄週二至週六 13:30–19:30、每節 90 分鐘、每節 4 位、最早可約明天、最遠 60 天。
 - 體驗課預約後為「待匯款」，顧客回報匯款帳號末五碼後變「已回報」，工作室在管理頁按「確認」。到訪鑑賞不用付款，直接確認。
 - 國定假日等休息日在管理頁新增。
+- 一天只在一個城市：某天高雄已有預約，台南當天就不開放，反之亦然（`CONFIG.blockedBy`）。取消後會重新開放。
+- 即時通知：Worker 會把新預約、回報末五碼、狀態變更送到 `booking/notify.gs`（Google Apps Script），由它寄 Email、同步 Google 日曆，並可選擇推送 LINE。把 GAS 網頁應用程式網址設為 Worker 的 Secret `NOTIFY_URL` 即啟用；設定項目見 `notify.gs` 開頭。
 
 已部署在 `https://strangecat-booking.fiveathree.workers.dev`，並已填入 `js/config.js`。Cloudflare 已連接這個 GitHub repo（根目錄 `/booking`），之後每次 push 到 `main` 都會自動重新部署 Worker。
 

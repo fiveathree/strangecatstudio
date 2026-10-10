@@ -112,5 +112,24 @@ if (process.argv[2] === 'serve') {
   assert.equal(r.data.days[0].closed, '國定假日');
   assert.equal((await call('POST', '/api/bookings', { ...person, time: '18:00' })).status, 400);
 
+  // One city a day: a Kaohsiung booking closes Tainan that date, and the reverse.
+  const kh = nextDate('kh', 9);
+  const guest = { studio: 'kh', date: kh, time: '13:30', type: 'visit', people: 1, name: '高雄客', phone: '0987654321' };
+  assert.equal((await call('POST', '/api/bookings', guest)).status, 201);
+  r = await call('GET', `/api/slots?studio=tn&from=${kh}&days=1`);
+  assert.equal(r.data.days[0].closed, '當日於高雄工作室服務');
+  r = await call('POST', '/api/bookings', { ...person, date: kh, time: '18:00' });
+  assert.equal(r.status, 409, 'Tainan is closed once Kaohsiung is booked that day');
+  assert.match(r.data.error, /高雄工作室/);
+  const tnOnly = nextDate('kh', 16);
+  assert.equal((await call('POST', '/api/bookings', { ...person, date: tnOnly, time: '13:30' })).status, 201);
+  assert.equal((await call('POST', '/api/bookings', { ...guest, date: tnOnly })).status, 409, 'and Kaohsiung once Tainan is booked');
+  // Cancelling the Kaohsiung booking reopens Tainan.
+  r = await call('GET', '/api/admin/bookings', null, 'test-token');
+  const khBooking = r.data.bookings.find((b) => b.studio === 'kh');
+  await call('PATCH', `/api/admin/bookings/${khBooking.id}`, { status: 'cancelled' }, 'test-token');
+  r = await call('GET', `/api/slots?studio=tn&from=${kh}&days=1`);
+  assert.equal(r.data.days[0].closed, null);
+
   console.log('all booking checks passed');
 }

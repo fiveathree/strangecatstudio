@@ -42,6 +42,9 @@
   color-scheme: dark;
 }
 
+/* `hidden` must win even over rules that set display (flex bars, grids). */
+[hidden] { display: none !important; }
+
 html { scroll-behavior: smooth; }
 /* Line breaking for Chinese copy: avoid a lone character or punctuation mark
    on the last line, and keep short labels in one piece. */

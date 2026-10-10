@@ -23,6 +23,10 @@ export const CONFIG = {
     kh: { name: '高雄工作室', weekdays: [2, 3, 4, 5, 6], open: '13:30', close: '19:30' },
   },
   types: { class: '琉璃體驗課', visit: '到訪鑑賞' },
+  // The same people run both studios, so they can only be in one city a day.
+  // A studio is closed on any date that already has a booking at one of the
+  // studios listed for it here. Use empty lists to let both open the same day.
+  blockedBy: { tn: ['kh'], kh: ['tn'] },
 };
 // -----------------------------------------------------------------------------
 
@@ -73,6 +77,28 @@ function dateProblem(studio, date, today) {
   return null;
 }
 
+function blockers(studio) {
+  return CONFIG.blockedBy[studio] || [];
+}
+
+function closedForOtherStudio(studio) {
+  return '當日於' + blockers(studio).map((s) => CONFIG.studios[s].name).join('、') + '服務';
+}
+
+/** Tells the studio's notifier (a Google Apps Script web app) about a change. */
+function notify(env, ctx, event, booking) {
+  if (!env.NOTIFY_URL || !booking) return;
+  const payload = {
+    event, // 'booked' | 'payment' | 'status'
+    booking: { ...booking, studioName: CONFIG.studios[booking.studio].name, typeName: CONFIG.types[booking.type] },
+    slotMinutes: CONFIG.slotMinutes,
+  };
+  const send = fetch(env.NOTIFY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    .catch((err) => console.error('notify failed', err));
+  // Let the reply to the customer go out without waiting for the notifier.
+  if (ctx && ctx.waitUntil) ctx.waitUntil(send);
+}
+
 function cors(env, request) {
   const allowed = (env.ALLOWED_ORIGINS || '*').split(',').map((s) => s.trim());
   const origin = request.headers.get('Origin') || '';
@@ -117,6 +143,13 @@ async function getSlots(url, env) {
   for (const row of taken.results) used[row.date + ' ' + row.time] = row.people;
   const closures = {};
   for (const row of closed.results) closures[row.date] = row.reason || '休息';
+  const others = blockers(studio);
+  if (others.length) {
+    const busy = await env.DB.prepare(
+      `SELECT DISTINCT date FROM bookings WHERE studio IN (${others.map(() => '?').join(',')}) AND date BETWEEN ? AND ? AND status != 'cancelled'`
+    ).bind(...others, from, to).all();
+    for (const row of busy.results) if (!closures[row.date]) closures[row.date] = closedForOtherStudio(studio);
+  }
 
   const out = [];
   for (let i = 0; i < days; i++) {
@@ -132,7 +165,7 @@ async function getSlots(url, env) {
   return [{ studio, capacity: CONFIG.capacity, slotMinutes: CONFIG.slotMinutes, days: out }, 200];
 }
 
-async function createBooking(body, env) {
+async function createBooking(body, env, ctx) {
   const studio = body.studio;
   const type = body.type;
   const people = Number(body.people);
@@ -158,14 +191,21 @@ async function createBooking(body, env) {
   const result = await env.DB.prepare(
     `INSERT INTO bookings (code, studio, date, time, type, people, name, phone, line_id, note, status, created_at)
      SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
-     WHERE (SELECT COALESCE(SUM(people), 0) FROM bookings WHERE studio = ?2 AND date = ?3 AND time = ?4 AND status != 'cancelled') + ?6 <= ?13`
-  ).bind(code, studio, body.date, body.time, type, people, name, phone, clean(body.line, 40), clean(body.note, 300), status, new Date().toISOString(), CONFIG.capacity).run();
-  if (!result.meta.changes) return [{ error: '這個時段剛剛額滿了，請改選其他時段' }, 409];
+     WHERE (SELECT COALESCE(SUM(people), 0) FROM bookings WHERE studio = ?2 AND date = ?3 AND time = ?4 AND status != 'cancelled') + ?6 <= ?13
+       AND NOT EXISTS (SELECT 1 FROM bookings WHERE date = ?3 AND status != 'cancelled' AND instr(?14, ',' || studio || ',') > 0)`
+  ).bind(code, studio, body.date, body.time, type, people, name, phone, clean(body.line, 40), clean(body.note, 300), status, new Date().toISOString(), CONFIG.capacity, ',' + blockers(studio).join(',') + ',').run();
+  if (!result.meta.changes) {
+    const elsewhere = blockers(studio).length && await env.DB.prepare(
+      "SELECT 1 FROM bookings WHERE date = ? AND status != 'cancelled' AND instr(?, ',' || studio || ',') > 0"
+    ).bind(body.date, ',' + blockers(studio).join(',') + ',').first();
+    return [{ error: elsewhere ? '這一天' + closedForOtherStudio(studio) + '，請改選其他日期' : '這個時段剛剛額滿了，請改選其他時段' }, 409];
+  }
+  notify(env, ctx, 'booked', { code, studio, date: body.date, time: body.time, type, people, name, phone, line_id: clean(body.line, 40), note: clean(body.note, 300), status });
 
   return [{ code, studio, studioName: CONFIG.studios[studio].name, date: body.date, time: body.time, type, typeName: CONFIG.types[type], people, status, slotMinutes: CONFIG.slotMinutes }, 201];
 }
 
-async function reportPayment(body, env) {
+async function reportPayment(body, env, ctx) {
   const code = clean(body.code, 12).toUpperCase();
   const phone = clean(body.phone, 20).replace(/[^\d+]/g, '');
   const last5 = clean(body.last5, 5);
@@ -174,6 +214,7 @@ async function reportPayment(body, env) {
     "UPDATE bookings SET pay_last5 = ?, status = CASE WHEN status = 'pending' THEN 'reported' ELSE status END WHERE code = ? AND phone = ? AND status != 'cancelled'"
   ).bind(last5, code, phone).run();
   if (!result.meta.changes) return [{ error: '找不到這筆預約，請確認預約編號與電話' }, 404];
+  notify(env, ctx, 'payment', await env.DB.prepare('SELECT * FROM bookings WHERE code = ?').bind(code).first());
   return [{ ok: true }, 200];
 }
 
@@ -182,7 +223,7 @@ function isAdmin(request, env) {
   return Boolean(env.ADMIN_TOKEN) && token === env.ADMIN_TOKEN;
 }
 
-async function admin(request, url, env) {
+async function admin(request, url, env, ctx) {
   if (!isAdmin(request, env)) return [{ error: '未授權' }, 401];
   const path = url.pathname;
 
@@ -198,7 +239,9 @@ async function admin(request, url, env) {
     const body = await request.json().catch(() => ({}));
     if (!STATUSES.includes(body.status)) return [{ error: '狀態不正確' }, 400];
     const result = await env.DB.prepare('UPDATE bookings SET status = ? WHERE id = ?').bind(body.status, Number(match[1])).run();
-    return result.meta.changes ? [{ ok: true }, 200] : [{ error: '找不到這筆預約' }, 404];
+    if (!result.meta.changes) return [{ error: '找不到這筆預約' }, 404];
+    notify(env, ctx, 'status', await env.DB.prepare('SELECT * FROM bookings WHERE id = ?').bind(Number(match[1])).first());
+    return [{ ok: true }, 200];
   }
 
   if (path === '/api/admin/closures' && (request.method === 'POST' || request.method === 'DELETE')) {
@@ -216,7 +259,7 @@ async function admin(request, url, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const headers = cors(env, request);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
     const url = new URL(request.url);
@@ -225,11 +268,11 @@ export default {
       if (url.pathname === '/api/slots' && request.method === 'GET') {
         result = await getSlots(url, env);
       } else if (url.pathname === '/api/bookings' && request.method === 'POST') {
-        result = await createBooking(await request.json().catch(() => ({})), env);
+        result = await createBooking(await request.json().catch(() => ({})), env, ctx);
       } else if (url.pathname === '/api/bookings/payment' && request.method === 'POST') {
-        result = await reportPayment(await request.json().catch(() => ({})), env);
+        result = await reportPayment(await request.json().catch(() => ({})), env, ctx);
       } else if (url.pathname.startsWith('/api/admin/')) {
-        result = await admin(request, url, env);
+        result = await admin(request, url, env, ctx);
       } else {
         result = [{ error: 'Not found' }, 404];
       }
