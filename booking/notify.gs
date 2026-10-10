@@ -1,7 +1,7 @@
 /**
  * 奇怪貓工作室 — booking notifier (Google Apps Script web app).
  *
- * The booking Worker posts here whenever a booking is made, a customer reports
+ * The booking Worker posts here whenever a booking or shop order is made, a customer reports
  * their transfer, or the studio changes a booking's status. This script then:
  *   1. emails the studio,
  *   2. keeps the studio's Google Calendar in step (adds, retitles, removes),
@@ -20,6 +20,7 @@
  */
 
 var STATUS = { pending: '待匯款', reported: '已回報末五碼', confirmed: '已確認', cancelled: '已取消' };
+var ORDER_STATUS = { pending: '待匯款', reported: '已回報末五碼', paid: '已收款', shipped: '已出貨', done: '已完成', cancelled: '已取消' };
 var ADDRESS = { tn: '台南市北區長榮路四段40號', kh: '高雄市中華五路939巷24號' };
 
 function doPost(e) {
@@ -28,6 +29,7 @@ function doPost(e) {
   if (key && e.parameter.key !== key) return reply({ ok: false, error: 'bad key' });
 
   var data = JSON.parse(e.postData.contents);
+  if (data.order) return orderNotice(props, data);
   var b = data.booking;
   var heading = { booked: '新預約', payment: '已回報匯款末五碼', status: '預約狀態更新' }[data.event] || '預約通知';
   var summary = b.studioName + ' ' + b.date + ' ' + b.time + '｜' + b.typeName + '｜' + b.name + ' ' + b.people + ' 位';
@@ -50,6 +52,33 @@ function doPost(e) {
   });
   attempt(errors, 'calendar', function () {
     syncCalendar(props.getProperty('CALENDAR_ID'), b, data.slotMinutes || 90, lines);
+  });
+  attempt(errors, 'line', function () {
+    pushLine(props.getProperty('LINE_TOKEN'), props.getProperty('LINE_TO'), lines.join('\n'));
+  });
+  return reply({ ok: errors.length === 0, errors: errors });
+}
+
+/** Shop orders: email and LINE only (nothing goes on the calendar). */
+function orderNotice(props, data) {
+  var o = data.order;
+  var heading = { order: '新訂單', order_payment: '訂單已回報匯款末五碼', order_status: '訂單狀態更新' }[data.event] || '訂單通知';
+  var lines = [heading + '（' + (ORDER_STATUS[o.status] || o.status) + '）', '訂單編號：' + o.code, o.name + '　' + o.phone]
+    .concat((o.items || []).map(function (it) { return '・' + it.name + ' × ' + it.qty + '　NT$' + it.price * it.qty; }))
+    .concat([
+      o.shipName + (o.ship_to ? '：' + o.ship_to : ''),
+      '運費 NT$' + o.ship_fee + '　合計 NT$' + o.total,
+      o.pay_last5 ? '匯款末五碼：' + o.pay_last5 : '',
+      o.tracking ? '寄件編號：' + o.tracking : '',
+      o.line_id ? 'LINE：' + o.line_id : '',
+      o.email ? 'Email：' + o.email : '',
+      o.note ? '備註：' + o.note : '',
+    ]).filter(String);
+  var errors = [];
+  attempt(errors, 'email', function () {
+    var to = (data.emails && data.emails.length ? data.emails.join(',') : '') ||
+      props.getProperty('STUDIO_EMAIL') || Session.getEffectiveUser().getEmail();
+    MailApp.sendEmail(to, '【奇怪貓訂單】' + heading + '：' + o.code + ' ' + o.name + ' NT$' + o.total, lines.join('\n'));
   });
   attempt(errors, 'line', function () {
     pushLine(props.getProperty('LINE_TOKEN'), props.getProperty('LINE_TO'), lines.join('\n'));

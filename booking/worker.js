@@ -12,8 +12,13 @@
 //   PUT   /api/admin/settings            { notify_emails }
 //   GET/POST /api/admin/products, PUT/DELETE /api/admin/products/:id
 //   POST  /api/admin/images              (photo bytes) -> { id, url }
-// Public catalogue:
+//   GET   /api/admin/orders, PATCH /api/admin/orders/:id   { status, tracking, admin_note }
+//   GET   /api/admin/customers, GET/PUT /api/admin/customers/:phone
+// Public shop:
 //   GET  /api/products, GET /api/images/:id
+//   POST /api/orders                 place an order
+//   POST /api/orders/payment         report transfer's last five digits
+//   POST /api/orders/lookup          { code, phone } -> the customer's own order
 
 // ---- Settings the studio is likely to change -------------------------------
 export const CONFIG = {
@@ -33,6 +38,18 @@ export const CONFIG = {
   // studios listed for it here. Use empty lists to let both open the same day.
   blockedBy: { tn: ['kh'], kh: ['tn'] },
 };
+
+// Shop: how an order can reach the customer, and what each way costs (NT$).
+// `ask` is what the customer has to fill in; leave it out for studio pick-up.
+export const SHOP = {
+  shipping: {
+    store: { name: '7-11 取貨', fee: 60, ask: '取貨門市名稱' },
+    home: { name: '宅配到府', fee: 120, ask: '收件地址' },
+    tn: { name: '台南工作室自取', fee: 0 },
+    kh: { name: '高雄工作室自取', fee: 0 },
+  },
+  maxQtyPerItem: 10,
+};
 // -----------------------------------------------------------------------------
 
 const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
@@ -45,6 +62,9 @@ const SUPPLIES = ['stock', 'made'];
 const PRODUCT_STATUSES = ['active', 'soldout', 'hidden'];
 const MAX_IMAGE_BYTES = 700 * 1024;
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+// pending = waiting for the transfer, reported = customer sent the last five digits,
+// paid = studio saw the money, shipped = on its way or ready to collect, done = received.
+const ORDER_STATUSES = ['pending', 'reported', 'paid', 'shipped', 'done', 'cancelled'];
 
 function minutes(hhmm) {
   const [h, m] = hhmm.split(':').map(Number);
@@ -117,6 +137,28 @@ function notify(env, ctx, event, booking) {
   }).catch((err) => console.error('notify failed', err));
   // Let the reply to the customer go out without waiting for the notifier.
   if (ctx && ctx.waitUntil) ctx.waitUntil(send);
+}
+
+/** Tells the same notifier about a shop order. */
+function notifyOrder(env, ctx, event, order) {
+  if (!env.NOTIFY_URL || !order) return;
+  const send = getSetting(env, 'notify_emails').then((emails) => {
+    const payload = { event, order: { ...order, shipName: SHOP.shipping[order.ship_method].name }, emails: emails ? emails.split(',') : [] };
+    return fetch(env.NOTIFY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  }).catch((err) => console.error('notify failed', err));
+  if (ctx && ctx.waitUntil) ctx.waitUntil(send);
+}
+
+/** Keeps one record per customer, keyed by phone. Newer details replace older ones; blanks never erase. */
+async function rememberCustomer(env, { name, phone, email = '', line = '' }) {
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `INSERT INTO customers (phone, name, email, line_id, note, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, '', ?5, ?5)
+     ON CONFLICT(phone) DO UPDATE SET name = ?2,
+       email = CASE WHEN ?3 != '' THEN ?3 ELSE email END,
+       line_id = CASE WHEN ?4 != '' THEN ?4 ELSE line_id END,
+       updated_at = ?5`
+  ).bind(phone, name, email, line, now).run();
 }
 
 function cors(env, request) {
@@ -220,6 +262,7 @@ async function createBooking(body, env, ctx) {
     ).bind(body.date, ',' + blockers(studio).join(',') + ',').first();
     return [{ error: elsewhere ? '這一天' + closedForOtherStudio(studio) + '，請改選其他日期' : '這個時段剛剛額滿了，請改選其他時段' }, 409];
   }
+  await rememberCustomer(env, { name, phone, line: clean(body.line, 40) });
   notify(env, ctx, 'booked', { code, studio, date: body.date, time: body.time, type, people, name, phone, line_id: clean(body.line, 40), note: clean(body.note, 300), status });
 
   return [{ code, studio, studioName: CONFIG.studios[studio].name, date: body.date, time: body.time, type, typeName: CONFIG.types[type], people, status, slotMinutes: CONFIG.slotMinutes }, 201];
@@ -246,6 +289,8 @@ function productOut(row, origin) {
     // Counted stock that has run out reads as sold out without anyone changing the status.
     status: row.status === 'active' && row.stock === 0 ? 'soldout' : row.status,
     sort: row.sort, link: row.link || '',
+    // Only ready-made pieces with a fixed price go in the cart; the rest are arranged with the studio.
+    buyable: row.status === 'active' && row.stock !== 0 && row.supply === 'stock' && row.price !== null && !row.price_from && !row.link,
     image: row.image_id ? origin + '/api/images/' + row.image_id : row.image_url || '',
   };
 }
@@ -282,6 +327,109 @@ async function getImage(id, env, headers) {
   if (!row) return json({ error: 'Not found' }, 404, headers);
   // An uploaded photo never changes (a new upload gets a new id), so browsers may keep it.
   return new Response(new Uint8Array(row.data), { headers: { ...headers, 'Content-Type': row.type, 'Cache-Control': 'public, max-age=31536000, immutable' } });
+}
+
+async function orderWithItems(env, order) {
+  const items = await env.DB.prepare('SELECT product_id, name, price, qty FROM order_items WHERE order_id = ? ORDER BY rowid').bind(order.id).all();
+  return { ...order, items: items.results };
+}
+
+async function putBackStock(env, items) {
+  for (const it of items) {
+    await env.DB.prepare('UPDATE products SET stock = stock + ? WHERE id = ? AND stock IS NOT NULL').bind(it.qty, it.product_id).run();
+  }
+}
+
+async function createOrder(body, env, ctx) {
+  const name = clean(body.name, 40);
+  const phone = clean(body.phone, 20).replace(/[^\d+]/g, '');
+  const email = clean(body.email, 80);
+  const method = SHOP.shipping[body.shipMethod] ? body.shipMethod : null;
+  const shipTo = clean(body.shipTo, 160);
+  if (!name) return [{ error: '請填寫姓名' }, 400];
+  if (phone.length < 8) return [{ error: '請填寫可聯絡的電話' }, 400];
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return [{ error: 'Email 格式不正確' }, 400];
+  if (!method) return [{ error: '請選擇取貨方式' }, 400];
+  if (SHOP.shipping[method].ask && !shipTo) return [{ error: '請填寫' + SHOP.shipping[method].ask }, 400];
+
+  // Merge repeated lines, then read prices from the database: the browser's numbers are never trusted.
+  const wanted = new Map();
+  for (const it of Array.isArray(body.items) ? body.items.slice(0, 30) : []) {
+    const id = Number(it && it.id);
+    const qty = Number(it && it.qty);
+    if (!Number.isInteger(id) || !Number.isInteger(qty) || qty < 1) return [{ error: '購物車內容不正確' }, 400];
+    wanted.set(id, (wanted.get(id) || 0) + qty);
+  }
+  if (!wanted.size) return [{ error: '購物車是空的' }, 400];
+  const lines = [];
+  for (const [id, qty] of wanted) {
+    const row = await env.DB.prepare('SELECT * FROM products WHERE id = ?').bind(id).first();
+    const p = row && productOut(row, '');
+    if (!p || !p.buyable) return [{ error: (row ? '「' + row.name + '」' : '其中一件貨品') + '目前無法線上訂購，請從購物車移除', productId: id }, 409];
+    if (qty > SHOP.maxQtyPerItem) return [{ error: '「' + p.name + '」每張訂單最多 ' + SHOP.maxQtyPerItem + ' 件', productId: id }, 400];
+    lines.push({ product_id: id, name: p.name, price: p.price, qty });
+  }
+
+  // Take the stock one item at a time; each UPDATE only succeeds while enough is left,
+  // so two customers can never both buy the last piece. If a later item fails, undo the earlier ones.
+  const taken = [];
+  for (const line of lines) {
+    const r = await env.DB.prepare(
+      "UPDATE products SET stock = CASE WHEN stock IS NULL THEN NULL ELSE stock - ?1 END WHERE id = ?2 AND status = 'active' AND (stock IS NULL OR stock >= ?1)"
+    ).bind(line.qty, line.product_id).run();
+    if (!r.meta.changes) {
+      await putBackStock(env, taken);
+      return [{ error: '「' + line.name + '」庫存不足，請調整數量', productId: line.product_id }, 409];
+    }
+    taken.push(line);
+  }
+
+  const subtotal = lines.reduce((sum, l) => sum + l.price * l.qty, 0);
+  const shipFee = SHOP.shipping[method].fee;
+  const order = {
+    code: newCode(), name, phone, email, line_id: clean(body.line, 40), ship_method: method, ship_to: shipTo,
+    note: clean(body.note, 300), subtotal, ship_fee: shipFee, total: subtotal + shipFee, status: 'pending', created_at: new Date().toISOString(),
+  };
+  let saved;
+  try {
+    saved = await env.DB.prepare(
+      `INSERT INTO orders (code, name, phone, email, line_id, ship_method, ship_to, note, subtotal, ship_fee, total, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
+    ).bind(order.code, name, phone, email, order.line_id, method, shipTo, order.note, subtotal, shipFee, order.total, 'pending', order.created_at).first();
+    for (const l of lines) {
+      await env.DB.prepare('INSERT INTO order_items (order_id, product_id, name, price, qty) VALUES (?, ?, ?, ?, ?)').bind(saved.id, l.product_id, l.name, l.price, l.qty).run();
+    }
+  } catch (err) {
+    await putBackStock(env, taken);
+    throw err;
+  }
+  await rememberCustomer(env, { name, phone, email, line: order.line_id });
+  notifyOrder(env, ctx, 'order', { ...order, items: lines });
+  return [{ code: order.code, items: lines, subtotal, shipFee, total: order.total, shipName: SHOP.shipping[method].name, status: 'pending' }, 201];
+}
+
+async function reportOrderPayment(body, env, ctx) {
+  const code = clean(body.code, 12).toUpperCase();
+  const phone = clean(body.phone, 20).replace(/[^\d+]/g, '');
+  const last5 = clean(body.last5, 5);
+  if (!/^\d{5}$/.test(last5)) return [{ error: '請輸入匯款帳號末五碼（5 位數字）' }, 400];
+  const result = await env.DB.prepare(
+    "UPDATE orders SET pay_last5 = ?, status = CASE WHEN status = 'pending' THEN 'reported' ELSE status END WHERE code = ? AND phone = ? AND status != 'cancelled'"
+  ).bind(last5, code, phone).run();
+  if (!result.meta.changes) return [{ error: '找不到這筆訂單，請確認訂單編號與電話' }, 404];
+  notifyOrder(env, ctx, 'order_payment', await orderWithItems(env, await env.DB.prepare('SELECT * FROM orders WHERE code = ?').bind(code).first()));
+  return [{ ok: true }, 200];
+}
+
+/** Lets a customer check their own order; both the code and the phone must match. */
+async function lookupOrder(body, env) {
+  const code = clean(body.code, 12).toUpperCase();
+  const phone = clean(body.phone, 20).replace(/[^\d+]/g, '');
+  const row = code && phone && await env.DB.prepare('SELECT * FROM orders WHERE code = ? AND phone = ?').bind(code, phone).first();
+  if (!row) return [{ error: '找不到這筆訂單，請確認訂單編號與電話' }, 404];
+  const o = await orderWithItems(env, row);
+  return [{ code: o.code, status: o.status, items: o.items, subtotal: o.subtotal, shipFee: o.ship_fee, total: o.total,
+    shipName: SHOP.shipping[o.ship_method].name, shipTo: o.ship_to, tracking: o.tracking || '', paid: Boolean(o.pay_last5), date: taipeiToday(Date.parse(o.created_at)) }, 200];
 }
 
 function isAdmin(request, env) {
@@ -355,6 +503,58 @@ async function admin(request, url, env, ctx) {
     return [{ ok: true }, 200];
   }
 
+  if (path === '/api/admin/orders' && request.method === 'GET') {
+    const rows = await env.DB.prepare('SELECT * FROM orders ORDER BY id DESC LIMIT 300').all();
+    const items = await env.DB.prepare('SELECT order_id, product_id, name, price, qty FROM order_items WHERE order_id IN (SELECT id FROM orders ORDER BY id DESC LIMIT 300)').all();
+    const byOrder = {};
+    for (const it of items.results) (byOrder[it.order_id] = byOrder[it.order_id] || []).push(it);
+    return [{ orders: rows.results.map((o) => ({ ...o, items: byOrder[o.id] || [] })), shipping: SHOP.shipping }, 200];
+  }
+
+  const orderMatch = path.match(/^\/api\/admin\/orders\/(\d+)$/);
+  if (orderMatch && request.method === 'PATCH') {
+    const id = Number(orderMatch[1]);
+    const body = await request.json().catch(() => ({}));
+    const current = await env.DB.prepare('SELECT * FROM orders WHERE id = ?').bind(id).first();
+    if (!current) return [{ error: '找不到這筆訂單' }, 404];
+    const status = body.status === undefined ? current.status : body.status;
+    if (!ORDER_STATUSES.includes(status)) return [{ error: '狀態不正確' }, 400];
+    // A cancelled order has already given its stock back, so it stays cancelled.
+    if (current.status === 'cancelled' && status !== 'cancelled') return [{ error: '已取消的訂單不能恢復，請客人重新下單' }, 400];
+    const tracking = body.tracking === undefined ? current.tracking : clean(body.tracking, 60);
+    const adminNote = body.admin_note === undefined ? current.admin_note : clean(body.admin_note, 300);
+    await env.DB.prepare('UPDATE orders SET status = ?, tracking = ?, admin_note = ? WHERE id = ?').bind(status, tracking, adminNote, id).run();
+    const saved = await orderWithItems(env, await env.DB.prepare('SELECT * FROM orders WHERE id = ?').bind(id).first());
+    if (status === 'cancelled' && current.status !== 'cancelled') await putBackStock(env, saved.items);
+    if (status !== current.status) notifyOrder(env, ctx, 'order_status', saved);
+    return [{ order: saved }, 200];
+  }
+
+  if (path === '/api/admin/customers' && request.method === 'GET') {
+    const rows = await env.DB.prepare(
+      `SELECT c.*,
+         (SELECT COUNT(*) FROM orders o WHERE o.phone = c.phone AND o.status != 'cancelled') AS orders,
+         (SELECT COALESCE(SUM(total), 0) FROM orders o WHERE o.phone = c.phone AND o.status IN ('paid', 'shipped', 'done')) AS spent,
+         (SELECT COUNT(*) FROM bookings b WHERE b.phone = c.phone AND b.status != 'cancelled') AS bookings
+       FROM customers c ORDER BY c.updated_at DESC LIMIT 1000`
+    ).all();
+    return [{ customers: rows.results }, 200];
+  }
+
+  const customerMatch = path.match(/^\/api\/admin\/customers\/(\+?\d{6,20})$/);
+  if (customerMatch && request.method === 'GET') {
+    const customer = await env.DB.prepare('SELECT * FROM customers WHERE phone = ?').bind(customerMatch[1]).first();
+    if (!customer) return [{ error: '找不到這位客人' }, 404];
+    const orders = await env.DB.prepare('SELECT * FROM orders WHERE phone = ? ORDER BY id DESC').bind(customer.phone).all();
+    const bookings = await env.DB.prepare('SELECT * FROM bookings WHERE phone = ? ORDER BY date DESC, time DESC').bind(customer.phone).all();
+    return [{ customer, orders: await Promise.all(orders.results.map((o) => orderWithItems(env, o))), bookings: bookings.results }, 200];
+  }
+  if (customerMatch && request.method === 'PUT') {
+    const body = await request.json().catch(() => ({}));
+    const r = await env.DB.prepare('UPDATE customers SET note = ? WHERE phone = ?').bind(clean(body.note, 500), customerMatch[1]).run();
+    return r.meta.changes ? [{ ok: true }, 200] : [{ error: '找不到這位客人' }, 404];
+  }
+
   if (path === '/api/admin/settings' && request.method === 'PUT') {
     const body = await request.json().catch(() => ({}));
     const emails = clean(body.notify_emails, 300).split(/[\s,;，；]+/).filter(Boolean);
@@ -393,7 +593,13 @@ export default {
       } else if (url.pathname === '/api/bookings/payment' && request.method === 'POST') {
         result = await reportPayment(await request.json().catch(() => ({})), env, ctx);
       } else if (url.pathname === '/api/products' && request.method === 'GET') {
-        return json({ products: await listProducts(env, url.origin, false) }, 200, { ...headers, 'Cache-Control': 'public, max-age=60' });
+        return json({ products: await listProducts(env, url.origin, false), shipping: SHOP.shipping, maxQtyPerItem: SHOP.maxQtyPerItem }, 200, { ...headers, 'Cache-Control': 'public, max-age=60' });
+      } else if (url.pathname === '/api/orders' && request.method === 'POST') {
+        result = await createOrder(await request.json().catch(() => ({})), env, ctx);
+      } else if (url.pathname === '/api/orders/payment' && request.method === 'POST') {
+        result = await reportOrderPayment(await request.json().catch(() => ({})), env, ctx);
+      } else if (url.pathname === '/api/orders/lookup' && request.method === 'POST') {
+        result = await lookupOrder(await request.json().catch(() => ({})), env);
       } else if (/^\/api\/images\/\d+$/.test(url.pathname) && request.method === 'GET') {
         return await getImage(url.pathname.split('/').pop(), env, headers);
       } else if (url.pathname.startsWith('/api/admin/')) {

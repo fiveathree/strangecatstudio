@@ -214,14 +214,18 @@
       return el;
     };
     var productCard = function (p) {
+      // The card is a box holding a link (photo and text) and, for pieces that can be
+      // bought online, an add-to-cart button.
+      var card = document.createElement('div');
       var a = document.createElement('a');
       var soldout = p.status === 'soldout';
-      a.className = 'p-card' + (soldout ? ' is-soldout' : '');
+      card.className = 'p-card' + (soldout ? ' is-soldout' : '');
+      a.className = 'p-link';
       a.href = p.link || 'visit.html';
       if (/^https:/.test(a.getAttribute('href'))) { a.target = '_blank'; a.rel = 'noopener'; }
-      a.setAttribute('data-stone', p.stone);
-      a.setAttribute('data-cat', p.cat);
-      a.setAttribute('data-supply', p.supply);
+      card.setAttribute('data-stone', p.stone);
+      card.setAttribute('data-cat', p.cat);
+      card.setAttribute('data-supply', p.supply);
       if (p.image) {
         var img = document.createElement('img');
         img.loading = 'lazy';
@@ -239,7 +243,20 @@
       a.appendChild(span('p-name', p.name));
       if (p.note) a.appendChild(span('p-note', p.note));
       a.appendChild(span('p-price', p.price == null ? '價錢請洽詢' : 'NT$' + Number(p.price).toLocaleString('en-US') + (p.priceFrom ? ' 起' : '')));
-      return a;
+      card.appendChild(a);
+      if (p.buyable && window.sscCart) {
+        var buy = document.createElement('button');
+        buy.type = 'button';
+        buy.className = 'p-buy';
+        buy.textContent = '加入購物車';
+        buy.addEventListener('click', function () {
+          window.sscCart.add(p.id, p.stock == null ? null : p.stock);
+          buy.textContent = '已加入 ✓';
+          setTimeout(function () { buy.textContent = '加入購物車'; }, 1400);
+        });
+        card.appendChild(buy);
+      }
+      return card;
     };
     if (window.SSC_API) {
       fetch(window.SSC_API + '/api/products').then(function (res) {

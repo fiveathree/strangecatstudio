@@ -169,5 +169,61 @@ if (process.argv[2] === 'serve') {
   assert.equal((await call('DELETE', `/api/admin/products/${pid}`, null, 'test-token')).status, 200);
   assert.equal((await worker.fetch(new Request('http://local/api/images/' + photoId), env)).status, 404, 'its photo goes with it');
 
+  // ---- Orders ----
+  const mk = async (over) => (await call('POST', '/api/admin/products', { ...item, ...over }, 'test-token')).data.product;
+  const ring = await mk({ name: '現貨戒指', stock: 2, price: 1000 });
+  const loose = await mk({ name: '不計庫存', stock: '', price: 500 });
+  const bespoke = await mk({ name: '訂製款', supply: 'made', stock: '' });
+  assert.equal(ring.buyable, true);
+  assert.equal(bespoke.buyable, false, 'made-to-order pieces are arranged with the studio');
+  const buyer = { name: '買家', phone: '0911-222-333', email: 'b@example.com', shipMethod: 'store', shipTo: '成大門市', items: [{ id: ring.id, qty: 2 }, { id: loose.id, qty: 1 }] };
+  assert.equal((await call('POST', '/api/orders', { ...buyer, items: [] })).status, 400);
+  assert.equal((await call('POST', '/api/orders', { ...buyer, shipTo: '' })).status, 400, 'a store order needs the store');
+  assert.equal((await call('POST', '/api/orders', { ...buyer, items: [{ id: bespoke.id, qty: 1 }] })).status, 409);
+  // Not enough of the second item: the first item's stock must come back.
+  r = await call('POST', '/api/orders', { ...buyer, items: [{ id: loose.id, qty: 1 }, { id: ring.id, qty: 3 }] });
+  assert.equal(r.status, 409);
+  r = await call('POST', '/api/orders', { ...buyer, items: [{ id: ring.id, qty: 1, price: 1 }, { id: ring.id, qty: 1 }, { id: loose.id, qty: 1 }] });
+  assert.equal(r.status, 201);
+  assert.equal(r.data.total, 2 * 1000 + 500 + 60, 'server prices plus the store fee');
+  const orderCode = r.data.code;
+  r = await call('GET', '/api/products');
+  assert.equal(r.data.products.find((p) => p.id === ring.id).status, 'soldout', 'the last pieces are gone');
+  assert.equal(r.data.shipping.store.fee, 60);
+  assert.equal((await call('POST', '/api/orders', { ...buyer, shipMethod: 'tn', shipTo: '', items: [{ id: ring.id, qty: 1 }] })).status, 409);
+
+  assert.equal((await call('POST', '/api/orders/lookup', { code: orderCode, phone: '0900000000' })).status, 404);
+  assert.equal((await call('POST', '/api/orders/payment', { code: orderCode, phone: '0911222333', last5: '54321' })).status, 200);
+  r = await call('POST', '/api/orders/lookup', { code: orderCode, phone: '0911222333' });
+  assert.equal(r.data.status, 'reported');
+  assert.equal(r.data.items.length, 2);
+
+  assert.equal((await call('GET', '/api/admin/orders')).status, 401);
+  r = await call('GET', '/api/admin/orders', null, 'test-token');
+  const ord = r.data.orders[0];
+  assert.equal(ord.pay_last5, '54321');
+  r = await call('PATCH', `/api/admin/orders/${ord.id}`, { status: 'shipped', tracking: 'A123456789' }, 'test-token');
+  assert.equal(r.data.order.tracking, 'A123456789');
+  assert.equal((await call('POST', '/api/orders/lookup', { code: orderCode, phone: '0911222333' })).data.tracking, 'A123456789');
+
+  // Customers: one record per phone, with what they have ordered and booked.
+  r = await call('GET', '/api/admin/customers', null, 'test-token');
+  const cust = r.data.customers.find((c) => c.phone === '0911222333');
+  assert.equal(cust.orders, 1);
+  assert.equal(cust.spent, 2560);
+  assert.ok(r.data.customers.find((c) => c.phone === person.phone).bookings >= 1, 'bookings create customers too');
+  assert.equal((await call('PUT', '/api/admin/customers/0911222333', { note: '喜歡藍色' }, 'test-token')).status, 200);
+  r = await call('GET', '/api/admin/customers/0911222333', null, 'test-token');
+  assert.equal(r.data.customer.note, '喜歡藍色');
+  assert.equal(r.data.orders[0].items.length, 2);
+
+  // Cancelling gives the stock back, once, and is final.
+  r = await call('PATCH', `/api/admin/orders/${ord.id}`, { status: 'cancelled' }, 'test-token');
+  await call('PATCH', `/api/admin/orders/${ord.id}`, { status: 'cancelled' }, 'test-token');
+  r = await call('GET', '/api/admin/products', null, 'test-token');
+  assert.equal(r.data.products.find((p) => p.id === ring.id).stock, 2);
+  assert.equal(r.data.products.find((p) => p.id === loose.id).stock, null);
+  assert.equal((await call('PATCH', `/api/admin/orders/${ord.id}`, { status: 'paid' }, 'test-token')).status, 400);
+
   console.log('all booking checks passed');
 }

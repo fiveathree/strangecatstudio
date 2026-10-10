@@ -63,3 +63,47 @@ CREATE TABLE IF NOT EXISTS images (
   type  TEXT NOT NULL,
   data  BLOB NOT NULL
 );
+
+-- Shop orders. Prices and names are copied into order_items so an order still
+-- reads correctly after the product is edited or deleted.
+CREATE TABLE IF NOT EXISTS orders (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  code         TEXT NOT NULL UNIQUE,
+  name         TEXT NOT NULL,
+  phone        TEXT NOT NULL,
+  email        TEXT,
+  line_id      TEXT,
+  ship_method  TEXT NOT NULL,              -- store | home | tn | kh (see SHOP in worker.js)
+  ship_to      TEXT,                       -- store name or address
+  note         TEXT,
+  subtotal     INTEGER NOT NULL,
+  ship_fee     INTEGER NOT NULL,
+  total        INTEGER NOT NULL,
+  -- pending | reported | paid | shipped | done | cancelled
+  status       TEXT NOT NULL DEFAULT 'pending',
+  pay_last5    TEXT,
+  tracking     TEXT,                       -- parcel number, filled in by the studio
+  admin_note   TEXT,
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS orders_phone ON orders (phone);
+
+CREATE TABLE IF NOT EXISTS order_items (
+  order_id    INTEGER NOT NULL,
+  product_id  INTEGER NOT NULL,
+  name        TEXT NOT NULL,
+  price       INTEGER NOT NULL,
+  qty         INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS order_items_order ON order_items (order_id);
+
+-- One row per customer, keyed by phone; filled in from orders and bookings.
+CREATE TABLE IF NOT EXISTS customers (
+  phone       TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  email       TEXT,
+  line_id     TEXT,
+  note        TEXT,                        -- the studio's own notes
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);

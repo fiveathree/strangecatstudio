@@ -229,8 +229,8 @@ button { cursor: pointer; }
 .filter-group { border-top: 1px solid var(--line); padding: 20px 0; }
 .result-bar { display: flex; justify-content: space-between; color: var(--muted); font-size: 14px; margin-bottom: 20px; }
 .p-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 32px 24px; }
-.p-card { display: flex; flex-direction: column; gap: 6px; color: var(--ink); text-decoration: none; }
-.p-card:hover { color: var(--ink); }
+.p-card, .p-link { display: flex; flex-direction: column; gap: 6px; color: var(--ink); text-decoration: none; }
+.p-card:hover, .p-link:hover { color: var(--ink); }
 .p-card[hidden] { display: none; }
 .p-card img, .p-card .ph { width: 100%; height: 260px; object-fit: cover; display: flex; margin-bottom: 8px; }
 .p-card img { display: block; }
@@ -472,3 +472,40 @@ button { cursor: pointer; }
 /* ---- Shop: sold-out cards ---- */
 .p-card.is-soldout img, .p-card.is-soldout .ph { opacity: 0.45; }
 .badge-soldout { border-color: var(--muted); color: var(--muted); }
+
+/* ---- Shop: cart ---- */
+.p-buy { margin-top: 8px; min-height: 44px; border: 1px solid var(--ink); border-radius: 999px; background: transparent; color: var(--ink); font: inherit; font-weight: 500; cursor: pointer; }
+.p-buy:hover { background: var(--ink); color: var(--on-ink); }
+.cart-pill { position: fixed; right: 20px; bottom: 20px; z-index: 30; display: inline-flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 24px; border-radius: 999px; background: var(--accent); color: #14110D; font-weight: 700; text-decoration: none; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); }
+.cart-pill:hover { color: #14110D; }
+.cart-pill span { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 999px; background: #14110D; color: #fff; font-size: 14px; }
+.cart-items { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.cart-item { display: grid; grid-template-columns: 72px 1fr auto; gap: 6px 14px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.cart-item img, .cart-item .ph { width: 72px; height: 72px; object-fit: cover; grid-row: span 2; font-size: 10px; }
+.cart-item-name { font-weight: 500; }
+.cart-item-price { color: var(--accent); white-space: nowrap; text-align: right; }
+.cart-item-problem { grid-column: 2 / -1; color: #E0694F; font-size: 14px; }
+.cart-qty { display: inline-flex; align-items: center; gap: 4px; }
+.cart-qty button { width: 40px; height: 40px; border: 1px solid var(--line2); border-radius: 50%; background: transparent; color: var(--ink); font-size: 18px; cursor: pointer; }
+.cart-qty output { min-width: 28px; text-align: center; }
+.cart-remove { justify-self: end; border: 0; background: none; color: var(--muted); font: inherit; font-size: 14px; text-decoration: underline; cursor: pointer; min-height: 40px; }
+.cart-total { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.cart-total div { display: flex; justify-content: space-between; color: var(--soft); }
+.cart-total dd { margin: 0; }
+.cart-total .cart-grand { padding-top: 10px; border-top: 1px solid var(--line); color: var(--ink); font-size: 20px; font-weight: 700; }
+.cart-lines { margin: 0; padding: 0; list-style: none; color: var(--soft); }
+/* ---- Admin: orders and customers ---- */
+.admin-tabs { flex-wrap: wrap; }
+.admin-order { padding: 16px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; font-size: 14px; color: var(--soft); }
+.admin-order.is-cancelled { opacity: 0.5; }
+.admin-order-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.admin-order-head strong { font-size: 16px; color: var(--ink); letter-spacing: 0.06em; }
+.admin-order-head .badge-premium { margin-left: auto; }
+.admin-order ul { margin: 0; padding-left: 18px; }
+.admin-order .admin-bar { margin: 4px 0 0; }
+.admin-order .admin-bar input { min-height: 40px; flex: 1 1 160px; }
+.admin-order .chip { min-height: 40px; padding: 0 16px; font-size: 14px; }
+.admin-customer { cursor: pointer; }
+.admin-detail { padding: 20px; margin: 0 0 24px; background: var(--card); border: 1px solid var(--line2); display: flex; flex-direction: column; gap: 12px; font-size: 14px; color: var(--soft); }
+.admin-detail textarea { min-height: 80px; padding: 12px; font: inherit; font-size: 16px; border: 1px solid var(--line2); border-radius: 6px; }
+.admin-detail ul { margin: 0; padding-left: 18px; }
