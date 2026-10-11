@@ -124,3 +124,19 @@ CREATE TABLE IF NOT EXISTS points (
   created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS points_phone ON points (phone);
+
+-- How products are filed. kind 'stone' = what it is made of, 'cat' = what kind of piece.
+-- Products store the slug, so a category can be renamed freely.
+CREATE TABLE IF NOT EXISTS categories (
+  id    INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind  TEXT NOT NULL,
+  slug  TEXT NOT NULL,
+  name  TEXT NOT NULL,
+  sort  INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (kind, slug)
+);
+INSERT OR IGNORE INTO categories (kind, slug, name, sort) VALUES
+  ('stone', 'glass', '玻璃鑽石', 10), ('stone', 'lab', '實驗室鑽石', 20), ('stone', 'cosmic', '宇宙玻璃', 30),
+  ('stone', 'crystal', '水晶鍊', 40), ('stone', 'glassware', '玻璃飾品', 50),
+  ('cat', 'ring', '戒指', 10), ('cat', 'necklace', '項鍊', 20), ('cat', 'earrings', '耳環', 30),
+  ('cat', 'bracelet', '手鍊', 40), ('cat', 'other', '其他', 50);

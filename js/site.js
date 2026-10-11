@@ -264,13 +264,41 @@
         return res.json();
       }).then(function (data) {
         if (!data.products || !data.products.length) return;
+        // Filter buttons follow the categories the studio keeps in the back office,
+        // leaving out any that have nothing to show.
+        var chipRow = function (filter, items, allLabel) {
+          var first = document.querySelector('.chip[data-filter="' + filter + '"]');
+          if (!first || !items || !items.length) return;
+          var row = first.parentNode;
+          var current = (row.querySelector('[aria-pressed="true"]') || first).getAttribute('data-value');
+          row.textContent = '';
+          [{ slug: '', name: allLabel }].concat(items.filter(function (c) {
+            return data.products.some(function (p) { return p[filter] === c.slug; });
+          })).forEach(function (c) {
+            var chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'chip';
+            chip.textContent = c.name;
+            chip.setAttribute('data-filter', filter);
+            chip.setAttribute('data-value', c.slug);
+            chip.setAttribute('aria-pressed', c.slug === current ? 'true' : 'false');
+            chip.addEventListener('click', function () { setFilter(filter, c.slug); applyFilters(); });
+            row.appendChild(chip);
+          });
+          if (!row.querySelector('[aria-pressed="true"]')) row.firstChild.setAttribute('aria-pressed', 'true');
+        };
+        if (data.categories) {
+          data.categories.stone.forEach(function (c) { STONE_NAME[c.slug] = c.name; });
+          chipRow('stone', data.categories.stone, '全部主石');
+          chipRow('cat', data.categories.cat, '全部');
+        }
         grid.textContent = '';
         data.products.forEach(function (p) { grid.appendChild(productCard(p)); });
         applyFilters();
       }).catch(function () {});
     }
     // Links such as shop.html?stone=glass open with that stone pre-selected.
-    var m = /[?&]stone=(glass|lab|cosmic|crystal|glassware)/.exec(window.location.search);
+    var m = /[?&]stone=([\w-]+)/.exec(window.location.search);
     if (m) setFilter('stone', m[1]);
     applyFilters();
   }

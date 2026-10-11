@@ -8,37 +8,66 @@
 <link rel="icon" href="assets/logo.png">
 <link rel="stylesheet" href="css/site.css">
 </head>
-<body>
-<div class="wrap admin" style="padding-top: 40px; padding-bottom: 80px; color: var(--ink); font-family: 'Noto Sans TC', sans-serif; line-height: 1.7">
-<div class="eyebrow">STUDIO ONLY</div>
-<h1 class="h-serif" style="font-size: 36px; margin: 6px 0 24px">工作室後台</h1>
+<body class="admin-body">
 
-<form id="login" class="admin-bar">
+<form id="login" class="admin-login">
+<img src="assets/logo.png" alt="" width="72" height="72">
+<div class="eyebrow">STUDIO ONLY</div>
+<h1 class="h-serif">工作室後台</h1>
 <label for="token">管理密碼</label>
 <input id="token" type="password" autocomplete="current-password" required>
-<button type="submit" class="chip" aria-pressed="true">登入</button>
+<button type="submit" class="bk-submit">登入</button>
 <p id="login-error" class="bk-error" role="alert" hidden></p>
 </form>
 
-<div id="panel" hidden>
-<div class="admin-bar">
-<button type="button" class="chip" id="reload">重新整理</button>
-<button type="button" class="chip" id="logout">登出</button>
-<span id="summary" style="color: var(--muted)"></span>
+<div id="panel" class="admin-shell" hidden>
+<aside class="admin-side" id="side">
+<a class="admin-brand" href="index.html" target="_blank" rel="noopener"><img src="assets/logo.png" alt="" width="40" height="40"><span><strong>奇怪貓工作室</strong><small>後台管理</small></span></a>
+<nav aria-label="後台選單">
+<button type="button" class="admin-nav" data-tab="home" aria-pressed="true">總覽</button>
+<div class="admin-nav-group">預約</div>
+<button type="button" class="admin-nav" data-tab="bookings" aria-pressed="false">預約列表<span class="admin-count" id="n-bookings" hidden></span></button>
+<button type="button" class="admin-nav" data-tab="closures" aria-pressed="false">休息日</button>
+<div class="admin-nav-group">銷售</div>
+<button type="button" class="admin-nav" data-tab="orders" aria-pressed="false">訂單<span class="admin-count" id="n-orders" hidden></span></button>
+<div class="admin-nav-group">貨品</div>
+<button type="button" class="admin-nav" data-tab="products" aria-pressed="false">貨品列表</button>
+<button type="button" class="admin-nav" data-tab="categories" aria-pressed="false">分類管理</button>
+<div class="admin-nav-group">客人</div>
+<button type="button" class="admin-nav" data-tab="customers" aria-pressed="false">客人名單</button>
+<div class="admin-nav-group">分析</div>
+<button type="button" class="admin-nav" data-tab="report" aria-pressed="false">報表</button>
+<div class="admin-nav-group">系統</div>
+<button type="button" class="admin-nav" data-tab="settings" aria-pressed="false">設定</button>
+</nav>
+<div class="admin-side-foot">
+<button type="button" class="admin-nav" id="reload">重新整理</button>
+<button type="button" class="admin-nav" id="logout">登出</button>
 </div>
+</aside>
 
-<div class="admin-tabs" role="tablist">
-<button type="button" class="chip" role="tab" data-tab="bookings" aria-pressed="true">預約</button>
-<button type="button" class="chip" role="tab" data-tab="orders" aria-pressed="false">訂單</button>
-<button type="button" class="chip" role="tab" data-tab="products" aria-pressed="false">貨品</button>
-<button type="button" class="chip" role="tab" data-tab="customers" aria-pressed="false">客人</button>
-<button type="button" class="chip" role="tab" data-tab="report" aria-pressed="false">報表</button>
-<button type="button" class="chip" role="tab" data-tab="settings" aria-pressed="false">設定</button>
+<main class="admin-main">
+<header class="admin-top">
+<button type="button" class="admin-menu" id="menu" aria-controls="side" aria-expanded="false" aria-label="開啟選單"><span></span><span></span><span></span></button>
+<h1 class="h-serif" id="page-title">總覽</h1>
+<span id="summary" class="admin-top-note" hidden></span>
+</header>
+
+<section id="tab-home">
+<div id="h-tiles" class="admin-tiles"></div>
+<div class="admin-cols">
+<div><h2 class="admin-h2">今天與明天的預約</h2><div id="h-bookings" class="admin-plain"></div></div>
+<div><h2 class="admin-h2">要處理的訂單</h2><div id="h-orders" class="admin-plain"></div></div>
+<div><h2 class="admin-h2">庫存快賣完</h2><div id="h-stock" class="admin-plain"></div></div>
 </div>
+</section>
 
-<section id="tab-bookings">
+<section id="tab-bookings" hidden>
 <div id="list"></div>
-<h2 class="h-serif" style="font-size: 26px; margin: 48px 0 12px">休息日</h2>
+</section>
+
+<section id="tab-closures" hidden>
+<p class="bk-hint" style="margin: 0 0 16px">國定假日或臨時休息：設定後那一天該工作室不接受預約。</p>
 <form id="closure" class="admin-bar">
 <select id="c-studio" aria-label="工作室"><option value="tn">台南</option><option value="kh">高雄</option></select>
 <input id="c-date" type="date" required aria-label="日期">
@@ -90,17 +119,30 @@
 <p class="bk-hint">營業額只計已確認收款的訂單（含運費，已扣積分折抵），不包括體驗課收入。網站流量請到 Google Analytics 查看。</p>
 </section>
 
+<section id="tab-categories" hidden>
+<p class="bk-hint" style="margin: 0 0 20px">貨品用兩種方式分類：「主石」是材質，「類別」是款式。現貨頁的篩選按鈕會照這裡的名稱與順序顯示。改名不會影響已有的貨品。</p>
+<div class="admin-cols admin-cols-2">
+<div><h2 class="admin-h2">主石</h2><div id="cat-stone" class="admin-cats"></div></div>
+<div><h2 class="admin-h2">類別</h2><div id="cat-cat" class="admin-cats"></div></div>
+</div>
+<p id="cat-error" class="bk-error" role="alert" hidden></p>
+</section>
+
 <section id="tab-products" hidden>
 <div class="admin-bar">
 <button type="button" class="chip" id="p-new" aria-pressed="true">＋ 新增貨品</button>
-<span id="p-summary" style="color: var(--muted)"></span>
+<input id="p-search" type="search" placeholder="搜尋貨品名稱、規格" aria-label="搜尋貨品" style="flex: 1 1 200px">
+<select id="p-f-cat" aria-label="類別"></select>
+<select id="p-f-status" aria-label="狀態"><option value="">全部狀態</option><option value="active">上架</option><option value="soldout">售完</option><option value="hidden">隱藏</option></select>
 </div>
+<div class="chip-row" id="p-f-stone" style="margin-bottom: 12px"></div>
+<p id="p-summary" style="color: var(--muted); margin: 0 0 8px"></p>
 <form id="p-form" class="admin-form" hidden>
 <h2 class="h-serif" id="p-form-title" style="font-size: 24px; margin: 0">新增貨品</h2>
 <div class="bk-form">
 <div class="bk-input bk-input-wide"><label for="p-name">名稱</label><input id="p-name" type="text" maxlength="60" required></div>
-<div class="bk-input"><label for="p-stone">主石</label><select id="p-stone"><option value="glass">玻璃鑽石</option><option value="lab">實驗室鑽石</option><option value="cosmic">宇宙玻璃</option><option value="crystal">水晶鍊</option><option value="glassware">玻璃飾品</option></select></div>
-<div class="bk-input"><label for="p-cat">類別</label><select id="p-cat"><option value="ring">戒指</option><option value="necklace">項鍊</option><option value="earrings">耳環</option><option value="bracelet">手鍊</option><option value="other">其他</option></select></div>
+<div class="bk-input"><label for="p-stone">主石</label><select id="p-stone"></select></div>
+<div class="bk-input"><label for="p-cat">類別</label><select id="p-cat"></select></div>
 <div class="bk-input"><label for="p-supply">供應方式</label><select id="p-supply"><option value="stock">現貨</option><option value="made">手工訂製</option></select></div>
 <div class="bk-input"><label for="p-status">狀態</label><select id="p-status"><option value="active">上架</option><option value="soldout">售完</option><option value="hidden">隱藏</option></select></div>
 <div class="bk-input"><label for="p-price">價錢（NT$）</label><input id="p-price" type="number" inputmode="numeric" min="0" step="1" placeholder="留空＝請洽詢"></div>
@@ -124,7 +166,7 @@
 </section>
 
 <section id="tab-settings" hidden>
-<h2 class="h-serif" style="font-size: 26px; margin: 8px 0 12px">通知收件人</h2>
+<h2 class="admin-h2">通知收件人</h2>
 <form id="notify" class="admin-bar">
 <input id="n-emails" type="text" placeholder="例如 boss@example.com, staff@example.com" aria-label="接收預約通知的 Email" style="flex: 1 1 320px">
 <button type="submit" class="chip" aria-pressed="true">儲存</button>
@@ -133,7 +175,7 @@
 <p style="margin: -8px 0 0; color: var(--muted); font-size: 14px">新預約、回報末五碼、狀態變更都會寄到這些 Email，最多 5 個，用逗號分隔。留空則寄給設定通知程式的帳號。</p>
 
 </section>
-</div>
+</main>
 </div>
 
 <script src="js/config.js"></script>
@@ -185,7 +227,7 @@
     var list = $('list');
     list.textContent = '';
     var active = data.bookings.filter(function (b) { return b.status !== 'cancelled'; });
-    $('summary').textContent = '今天起共 ' + active.length + ' 筆有效預約，' + data.bookings.filter(function (b) { return b.status === 'reported'; }).length + ' 筆待核對匯款';
+    $('summary').textContent = '今天起 ' + active.length + ' 筆有效預約，' + data.bookings.filter(function (b) { return b.status === 'reported'; }).length + ' 筆待核對匯款';
     var byDate = {};
     data.bookings.forEach(function (b) { (byDate[b.date] = byDate[b.date] || []).push(b); });
     Object.keys(byDate).sort().forEach(function (date) {
@@ -248,7 +290,9 @@
       $('login').hidden = true;
       $('panel').hidden = false;
       try { sessionStorage.setItem('ssc-admin', token); } catch (e) {}
+      bookingData = data;
       render(data);
+      renderHome();
       loadProducts();
       loadOrders();
       loadCustomers();
@@ -288,29 +332,44 @@
     api('POST', '/api/admin/closures', { studio: $('c-studio').value, date: $('c-date').value, reason: $('c-reason').value }).then(load);
   });
 
-  // ---- Tabs ----
+  // ---- Menu ----
   var tabs = document.querySelectorAll('[data-tab]');
-  tabs.forEach(function (tab) {
-    tab.addEventListener('click', function () {
-      tabs.forEach(function (t) {
-        var on = t === tab;
-        t.setAttribute('aria-pressed', on ? 'true' : 'false');
-        $('tab-' + t.getAttribute('data-tab')).hidden = !on;
-      });
-      try { sessionStorage.setItem('ssc-admin-tab', tab.getAttribute('data-tab')); } catch (e) {}
-      // Figures move whenever anything else changes, so the report is fetched fresh each time it is opened.
-      if (tab.getAttribute('data-tab') === 'report' && token) loadReport();
+  function go(name) {
+    tabs.forEach(function (t) {
+      var on = t.getAttribute('data-tab') === name;
+      t.setAttribute('aria-pressed', on ? 'true' : 'false');
+      $('tab-' + t.getAttribute('data-tab')).hidden = !on;
+      if (on) $('page-title').textContent = t.firstChild.textContent;
     });
+    $('summary').hidden = name !== 'bookings';
+    try { sessionStorage.setItem('ssc-admin-tab', name); } catch (e) {}
+    // Figures move whenever anything else changes, so the report is fetched fresh each time it is opened.
+    if (name === 'report' && token) loadReport();
+    // On a phone the menu slides away once a page is chosen.
+    $('side').classList.remove('is-open');
+    $('menu').setAttribute('aria-expanded', 'false');
+    window.scrollTo(0, 0);
+  }
+  tabs.forEach(function (tab) { tab.addEventListener('click', function () { go(tab.getAttribute('data-tab')); }); });
+  $('menu').addEventListener('click', function () {
+    var open = $('side').classList.toggle('is-open');
+    $('menu').setAttribute('aria-expanded', open ? 'true' : 'false');
   });
   try {
     var last = sessionStorage.getItem('ssc-admin-tab');
-    var lastTab = last && document.querySelector('[data-tab="' + last + '"]');
-    if (lastTab) lastTab.click();
+    if (last && $('tab-' + last)) go(last);
   } catch (e) {}
 
+  function count(id, n) {
+    $(id).textContent = n;
+    $(id).hidden = !n;
+  }
+
   // ---- Products ----
-  var STONE = { glass: '玻璃鑽石', lab: '實驗室鑽石', cosmic: '宇宙玻璃', crystal: '水晶鍊', glassware: '玻璃飾品' };
-  var CAT = { ring: '戒指', necklace: '項鍊', earrings: '耳環', bracelet: '手鍊', other: '其他' };
+  var categories = { stone: [], cat: [] };
+  var STONE = {}; // slug -> name, rebuilt whenever the categories load
+  var CAT = {};
+  var stoneFilter = '';
   var PSTATUS = { active: '上架', soldout: '售完', hidden: '隱藏' };
   var products = [];
   var editing = null;   // the product in the form, or null for a new one
@@ -320,48 +379,229 @@
     return p.price == null ? '請洽詢' : 'NT$' + Number(p.price).toLocaleString('en-US') + (p.priceFrom ? ' 起' : '');
   }
 
+  function productRow(p) {
+    var row = document.createElement('div');
+    row.className = 'admin-product' + (p.status === 'hidden' ? ' is-hidden' : '');
+    var thumb;
+    if (p.image) { thumb = document.createElement('img'); thumb.src = p.image; thumb.alt = ''; thumb.loading = 'lazy'; }
+    else { thumb = document.createElement('span'); thumb.textContent = '未有相片'; }
+    thumb.className = 'admin-thumb';
+    row.appendChild(thumb);
+    var info = document.createElement('div');
+    info.className = 'admin-product-info';
+    info.appendChild(cell('strong', p.name));
+    info.appendChild(cell('span', (CAT[p.cat] || '未分類') + (p.note ? ' ・ ' + p.note : '')));
+    row.appendChild(info);
+    var price = cell('span', priceText(p));
+    price.className = 'admin-product-price';
+    row.appendChild(price);
+    var state = cell('span', PSTATUS[p.status] + (p.stock == null ? '' : ' ・ 庫存 ' + p.stock));
+    state.className = 'admin-product-state' + (p.status !== 'active' ? ' admin-flag' : '');
+    row.appendChild(state);
+    var edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'chip';
+    edit.textContent = '編輯';
+    edit.addEventListener('click', function () { openForm(p); });
+    row.appendChild(edit);
+    return row;
+  }
+
   function renderProducts() {
     var list = $('p-list');
     list.textContent = '';
-    $('p-summary').textContent = '共 ' + products.length + ' 件，' +
-      products.filter(function (p) { return p.status === 'active'; }).length + ' 件上架中';
-    products.forEach(function (p) {
-      var row = document.createElement('div');
-      row.className = 'admin-product' + (p.status === 'hidden' ? ' is-hidden' : '');
-      var thumb;
-      if (p.image) { thumb = document.createElement('img'); thumb.src = p.image; thumb.alt = ''; thumb.loading = 'lazy'; }
-      else { thumb = document.createElement('span'); thumb.textContent = '未有相片'; }
-      thumb.className = 'admin-thumb';
-      row.appendChild(thumb);
-      var info = document.createElement('div');
-      info.className = 'admin-product-info';
-      var name = document.createElement('strong');
-      name.textContent = p.name;
-      info.appendChild(name);
-      var meta = document.createElement('span');
-      meta.textContent = STONE[p.stone] + ' ・ ' + CAT[p.cat] + ' ・ ' + priceText(p);
-      info.appendChild(meta);
-      var state = document.createElement('span');
-      state.textContent = PSTATUS[p.status] + (p.stock == null ? '' : ' ・ 庫存 ' + p.stock);
-      if (p.status !== 'active') state.className = 'admin-flag';
-      info.appendChild(state);
-      row.appendChild(info);
-      var edit = document.createElement('button');
-      edit.type = 'button';
-      edit.className = 'chip';
-      edit.textContent = '編輯';
-      edit.addEventListener('click', function () { openForm(p); });
-      row.appendChild(edit);
-      list.appendChild(row);
+    var q = $('p-search').value.trim().toLowerCase();
+    var cat = $('p-f-cat').value;
+    var status = $('p-f-status').value;
+    var match = function (p) {
+      return (!cat || p.cat === cat) && (!status || p.status === status) &&
+        (!q || (p.name + ' ' + p.note).toLowerCase().indexOf(q) !== -1);
+    };
+    var matching = products.filter(match);
+
+    // Stone chips, each showing how many products match the other filters.
+    var chips = $('p-f-stone');
+    chips.textContent = '';
+    [{ slug: '', name: '全部主石' }].concat(categories.stone).forEach(function (c) {
+      var n = c.slug ? matching.filter(function (p) { return p.stone === c.slug; }).length : matching.length;
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip';
+      chip.textContent = c.name + ' ' + n;
+      chip.setAttribute('aria-pressed', stoneFilter === c.slug ? 'true' : 'false');
+      chip.addEventListener('click', function () { stoneFilter = c.slug; renderProducts(); });
+      chips.appendChild(chip);
     });
-    if (!products.length) list.textContent = '還沒有貨品，按「新增貨品」開始。';
+
+    var shown = matching.filter(function (p) { return !stoneFilter || p.stone === stoneFilter; });
+    $('p-summary').textContent = '顯示 ' + shown.length + ' / ' + products.length + ' 件，' +
+      products.filter(function (p) { return p.status === 'active'; }).length + ' 件上架中';
+
+    // One block per stone, in the order set under 分類管理; anything filed under a deleted stone comes last.
+    var groups = categories.stone.map(function (c) { return { name: c.name, items: shown.filter(function (p) { return p.stone === c.slug; }) }; });
+    groups.push({ name: '未分類', items: shown.filter(function (p) { return !STONE[p.stone]; }) });
+    groups.forEach(function (g) {
+      if (!g.items.length) return;
+      var h = cell('h2', g.name);
+      h.className = 'admin-h2 admin-group';
+      var n = cell('span', g.items.length + ' 件');
+      h.appendChild(n);
+      list.appendChild(h);
+      g.items.forEach(function (p) { list.appendChild(productRow(p)); });
+    });
+    if (!shown.length) list.textContent = products.length ? '沒有符合條件的貨品。' : '還沒有貨品，按「新增貨品」開始。';
+  }
+
+  function fillSelect(id, items, first) {
+    var sel = $(id);
+    var keep = sel.value;
+    sel.textContent = '';
+    if (first) { var o = document.createElement('option'); o.value = ''; o.textContent = first; sel.appendChild(o); }
+    items.forEach(function (c) { var o = document.createElement('option'); o.value = c.slug; o.textContent = c.name; sel.appendChild(o); });
+    sel.value = keep;
+    if (sel.selectedIndex < 0) sel.selectedIndex = 0;
+  }
+
+  function setCategories(cats) {
+    categories = cats;
+    STONE = {}; CAT = {};
+    cats.stone.forEach(function (c) { STONE[c.slug] = c.name; });
+    cats.cat.forEach(function (c) { CAT[c.slug] = c.name; });
+    fillSelect('p-stone', cats.stone);
+    fillSelect('p-cat', cats.cat);
+    fillSelect('p-f-cat', cats.cat, '全部類別');
+    if (stoneFilter && !STONE[stoneFilter]) stoneFilter = '';
+    renderCategories('stone');
+    renderCategories('cat');
   }
 
   function loadProducts() {
     return api('GET', '/api/admin/products').then(function (data) {
       products = data.products;
+      setCategories(data.categories);
       renderProducts();
+      renderHome();
     });
+  }
+  ['p-search', 'p-f-cat', 'p-f-status'].forEach(function (id) { $(id).addEventListener('input', renderProducts); });
+
+  // ---- Categories ----
+  function catError(err) {
+    var box = $('cat-error');
+    box.textContent = err ? err.message : '';
+    box.hidden = !err;
+  }
+  function catDone(res) {
+    catError(null);
+    setCategories(res.categories);
+    renderProducts();
+  }
+
+  function renderCategories(kind) {
+    var box = $('cat-' + kind);
+    box.textContent = '';
+    var items = categories[kind];
+    var column = kind === 'stone' ? 'stone' : 'cat';
+    items.forEach(function (c, i) {
+      var row = document.createElement('div');
+      row.className = 'admin-cat';
+      var name = document.createElement('input');
+      name.type = 'text'; name.maxLength = 20; name.value = c.name;
+      name.setAttribute('aria-label', '分類名稱');
+      row.appendChild(name);
+      var n = products.filter(function (p) { return p[column] === c.slug; }).length;
+      row.appendChild(cell('span', n + ' 件'));
+      // Moving a row renumbers the whole list so the order is always clean.
+      var move = function (label, to, title) {
+        var b = document.createElement('button');
+        b.type = 'button'; b.className = 'chip admin-icon'; b.textContent = label; b.title = title;
+        b.setAttribute('aria-label', title);
+        b.disabled = to < 0 || to >= items.length;
+        b.addEventListener('click', function () {
+          var order = items.slice();
+          order.splice(to, 0, order.splice(i, 1)[0]);
+          var last = Promise.resolve(null);
+          order.forEach(function (x, at) {
+            if (x.sort !== (at + 1) * 10) last = last.then(function () { return api('PUT', '/api/admin/categories/' + x.id, { sort: (at + 1) * 10 }); });
+          });
+          last.then(function (res) { if (res) catDone(res); }).catch(catError);
+        });
+        return b;
+      };
+      row.appendChild(move('↑', i - 1, '上移'));
+      row.appendChild(move('↓', i + 1, '下移'));
+      var save = document.createElement('button');
+      save.type = 'button'; save.className = 'chip'; save.textContent = '改名';
+      save.addEventListener('click', function () { api('PUT', '/api/admin/categories/' + c.id, { name: name.value }).then(catDone).catch(catError); });
+      row.appendChild(save);
+      var del = document.createElement('button');
+      del.type = 'button'; del.className = 'chip admin-danger'; del.textContent = '刪除';
+      del.disabled = n > 0;
+      del.title = n > 0 ? '還有貨品在這個分類' : '';
+      del.addEventListener('click', function () {
+        if (del.textContent !== '確定？') { del.textContent = '確定？'; return; }
+        api('DELETE', '/api/admin/categories/' + c.id).then(catDone).catch(catError);
+      });
+      row.appendChild(del);
+      box.appendChild(row);
+    });
+    var add = document.createElement('form');
+    add.className = 'admin-cat';
+    var fresh = document.createElement('input');
+    fresh.type = 'text'; fresh.maxLength = 20; fresh.placeholder = '新增' + (kind === 'stone' ? '主石' : '類別') + '，例如：' + (kind === 'stone' ? '珍珠' : '胸針');
+    fresh.required = true;
+    fresh.setAttribute('aria-label', '新分類名稱');
+    var go = document.createElement('button');
+    go.type = 'submit'; go.className = 'chip'; go.textContent = '＋ 新增'; go.setAttribute('aria-pressed', 'true');
+    add.appendChild(fresh); add.appendChild(go);
+    add.addEventListener('submit', function (e) {
+      e.preventDefault();
+      api('POST', '/api/admin/categories', { kind: kind, name: fresh.value }).then(catDone).catch(catError);
+    });
+    box.appendChild(add);
+  }
+
+  // ---- Overview ----
+  var bookingData = null;
+  function renderHome() {
+    var today = day(new Date().toISOString());
+    var tomorrow = day(new Date(Date.now() + 86400000).toISOString());
+    var soon = (bookingData ? bookingData.bookings : []).filter(function (b) { return b.status !== 'cancelled' && (b.date === today || b.date === tomorrow); });
+    var bookingsToCheck = (bookingData ? bookingData.bookings : []).filter(function (b) { return b.status === 'reported'; }).length;
+    var toCheck = orders.filter(function (o) { return o.status === 'reported'; });
+    var toShip = orders.filter(function (o) { return o.status === 'paid'; });
+    var unpaid = orders.filter(function (o) { return o.status === 'pending'; });
+    var low = products.filter(function (p) { return p.stock != null && p.stock <= 1 && p.status !== 'hidden'; });
+    count('n-orders', toCheck.length + toShip.length);
+    count('n-bookings', bookingsToCheck);
+
+    var tiles = $('h-tiles');
+    tiles.textContent = '';
+    [['今天的預約', soon.filter(function (b) { return b.date === today; }).length, 'bookings'],
+      ['預約待核對匯款', bookingsToCheck, 'bookings'], ['訂單待核對匯款', toCheck.length, 'orders'],
+      ['訂單待出貨', toShip.length, 'orders'], ['訂單等客人匯款', unpaid.length, 'orders'], ['庫存快賣完', low.length, 'products']].forEach(function (x) {
+      var tile = document.createElement('button');
+      tile.type = 'button';
+      tile.className = 'admin-tile' + (x[1] ? ' is-on' : '');
+      tile.appendChild(cell('span', x[0]));
+      tile.appendChild(cell('strong', x[1]));
+      tile.addEventListener('click', function () { go(x[2]); });
+      tiles.appendChild(tile);
+    });
+
+    var fill = function (id, rows, empty) {
+      var box = $(id);
+      box.textContent = '';
+      rows.forEach(function (r) { box.appendChild(cell('div', r)); });
+      if (!rows.length) box.appendChild(cell('p', empty));
+    };
+    fill('h-bookings', soon.map(function (b) {
+      return (b.date === today ? '今天 ' : '明天 ') + b.time + '　' + STUDIO[b.studio] + ' ' + TYPE[b.type] + '　' + b.name + ' ' + b.people + ' 位　' + STATUS[b.status];
+    }), '今天和明天沒有預約。');
+    fill('h-orders', toCheck.concat(toShip).map(function (o) {
+      return o.code + '　' + o.name + '　' + money(o.total) + '　' + OSTATUS[o.status];
+    }), '沒有要處理的訂單。');
+    fill('h-stock', low.map(function (p) { return p.name + '　剩 ' + p.stock + ' 件'; }), '沒有庫存快賣完的貨品。');
   }
 
   function openForm(p) {
@@ -369,8 +609,8 @@
     photoBlob = null;
     $('p-form-title').textContent = p ? '編輯貨品' : '新增貨品';
     $('p-name').value = p ? p.name : '';
-    $('p-stone').value = p ? p.stone : 'glass';
-    $('p-cat').value = p ? p.cat : 'ring';
+    $('p-stone').value = p ? p.stone : (stoneFilter || (categories.stone[0] || {}).slug);
+    $('p-cat').value = p ? p.cat : ($('p-f-cat').value || (categories.cat[0] || {}).slug);
     $('p-supply').value = p ? p.supply : 'stock';
     // A product shown as sold out only because its stock hit zero is still "上架" underneath.
     $('p-status').value = p ? (p.status === 'soldout' && p.stock === 0 ? 'active' : p.status) : 'active';
@@ -557,6 +797,7 @@
       orders = data.orders;
       shipping = data.shipping;
       renderOrders();
+      renderHome();
     });
   }
 

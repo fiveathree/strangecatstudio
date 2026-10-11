@@ -169,6 +169,21 @@ if (process.argv[2] === 'serve') {
   assert.equal((await call('DELETE', `/api/admin/products/${pid}`, null, 'test-token')).status, 200);
   assert.equal((await worker.fetch(new Request('http://local/api/images/' + photoId), env)).status, 404, 'its photo goes with it');
 
+  // ---- Categories ----
+  r = await call('GET', '/api/products');
+  assert.deepEqual(r.data.categories.cat.map((c) => c.slug), ['ring', 'necklace', 'earrings', 'bracelet', 'other']);
+  assert.equal((await call('POST', '/api/admin/categories', { kind: 'cat', name: '戒指' }, 'test-token')).status, 409);
+  r = await call('POST', '/api/admin/categories', { kind: 'cat', name: '胸針' }, 'test-token');
+  assert.equal(r.status, 201);
+  const brooch = r.data.categories.cat.find((c) => c.name === '胸針');
+  r = await call('POST', '/api/admin/products', { ...item, name: '貓胸針', cat: brooch.slug }, 'test-token');
+  assert.equal(r.status, 201, 'a new category can be used straight away');
+  assert.equal((await call('DELETE', `/api/admin/categories/${brooch.id}`, null, 'test-token')).status, 409, 'still in use');
+  r = await call('PUT', `/api/admin/categories/${brooch.id}`, { name: '別針', sort: 5 }, 'test-token');
+  assert.equal(r.data.categories.cat[0].name, '別針', 'renamed and moved to the front');
+  await call('DELETE', `/api/admin/products/${r.data && (await call('GET', '/api/admin/products', null, 'test-token')).data.products.find((p) => p.name === '貓胸針').id}`, null, 'test-token');
+  assert.equal((await call('DELETE', `/api/admin/categories/${brooch.id}`, null, 'test-token')).status, 200);
+
   // ---- Orders ----
   const mk = async (over) => (await call('POST', '/api/admin/products', { ...item, ...over }, 'test-token')).data.product;
   const ring = await mk({ name: '現貨戒指', stock: 2, price: 1000 });

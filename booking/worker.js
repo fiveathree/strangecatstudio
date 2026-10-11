@@ -12,6 +12,7 @@
 //   PUT   /api/admin/settings            { notify_emails }
 //   GET/POST /api/admin/products, PUT/DELETE /api/admin/products/:id
 //   POST  /api/admin/images              (photo bytes) -> { id, url }
+//   POST  /api/admin/categories { kind, name }, PUT/DELETE /api/admin/categories/:id
 //   GET   /api/admin/orders, PATCH /api/admin/orders/:id   { status, tracking, admin_note }
 //   GET/POST /api/admin/customers, GET/PUT /api/admin/customers/:phone
 //   POST  /api/admin/customers/:phone/points   { delta, reason }
@@ -63,8 +64,9 @@ const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
 const STATUSES = ['pending', 'reported', 'confirmed', 'cancelled'];
 
 // Shop catalogue
-const STONES = ['glass', 'lab', 'cosmic', 'crystal', 'glassware'];
-const CATS = ['ring', 'necklace', 'earrings', 'bracelet', 'other'];
+// Products are filed two ways, both editable from the admin page (table `categories`):
+// 'stone' = what it is made of (主石), 'cat' = what kind of piece it is (類別).
+const CATEGORY_KINDS = { stone: '主石', cat: '類別' };
 const SUPPLIES = ['stock', 'made'];
 const PRODUCT_STATUSES = ['active', 'soldout', 'hidden'];
 const MAX_IMAGE_BYTES = 700 * 1024;
@@ -328,11 +330,11 @@ function productOut(row, origin) {
 }
 
 /** Checks a product sent from the admin page; returns [fields] or [null, problem]. */
-function productIn(body) {
+function productIn(body, cats) {
   const name = clean(body.name, 60);
   if (!name) return [null, '請填寫貨品名稱'];
-  if (!STONES.includes(body.stone)) return [null, '請選擇主石'];
-  if (!CATS.includes(body.cat)) return [null, '請選擇類別'];
+  if (!cats.stone.some((c) => c.slug === body.stone)) return [null, '請選擇主石'];
+  if (!cats.cat.some((c) => c.slug === body.cat)) return [null, '請選擇類別'];
   if (!SUPPLIES.includes(body.supply)) return [null, '請選擇供應方式'];
   if (!PRODUCT_STATUSES.includes(body.status)) return [null, '狀態不正確'];
   const whole = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
@@ -345,6 +347,14 @@ function productIn(body) {
   const imageId = whole(body.imageId);
   return [[name, body.stone, body.cat, body.supply, clean(body.note, 120), price, body.priceFrom ? 1 : 0, stock, body.status,
     Number.isInteger(Number(body.sort)) ? Number(body.sort) : 0, link, imageId]];
+}
+
+/** { stone: [{ id, slug, name, sort }], cat: [...] } in the order the studio chose. */
+async function listCategories(env) {
+  const rows = await env.DB.prepare('SELECT id, kind, slug, name, sort FROM categories ORDER BY sort, id').all();
+  const out = { stone: [], cat: [] };
+  for (const r of rows.results) if (out[r.kind]) out[r.kind].push({ id: r.id, slug: r.slug, name: r.name, sort: r.sort });
+  return out;
 }
 
 async function listProducts(env, origin, includeHidden) {
@@ -560,7 +570,41 @@ async function admin(request, url, env, ctx) {
   }
 
   if (path === '/api/admin/products' && request.method === 'GET') {
-    return [{ products: await listProducts(env, url.origin, true) }, 200];
+    return [{ products: await listProducts(env, url.origin, true), categories: await listCategories(env) }, 200];
+  }
+
+  // Categories: add, rename, reorder; one that still has products can't be removed.
+  const catMatch = path.match(/^\/api\/admin\/categories(?:\/(\d+))?$/);
+  if (catMatch && request.method === 'POST' && !catMatch[1]) {
+    const body = await request.json().catch(() => ({}));
+    const name = clean(body.name, 20);
+    if (!CATEGORY_KINDS[body.kind]) return [{ error: '分類種類不正確' }, 400];
+    if (!name) return [{ error: '請填寫分類名稱' }, 400];
+    if (await env.DB.prepare('SELECT 1 FROM categories WHERE kind = ? AND name = ?').bind(body.kind, name).first()) return [{ error: '已經有同名的分類' }, 409];
+    const last = await env.DB.prepare('SELECT COALESCE(MAX(sort), 0) AS n FROM categories WHERE kind = ?').bind(body.kind).first();
+    // The slug is what products store; it never changes, so renaming a category is safe.
+    const slug = 'c' + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
+    await env.DB.prepare('INSERT INTO categories (kind, slug, name, sort) VALUES (?, ?, ?, ?)').bind(body.kind, slug, name, last.n + 10).run();
+    return [{ categories: await listCategories(env) }, 201];
+  }
+  if (catMatch && catMatch[1] && request.method === 'PUT') {
+    const body = await request.json().catch(() => ({}));
+    const current = await env.DB.prepare('SELECT * FROM categories WHERE id = ?').bind(Number(catMatch[1])).first();
+    if (!current) return [{ error: '找不到這個分類' }, 404];
+    const name = body.name === undefined ? current.name : clean(body.name, 20);
+    if (!name) return [{ error: '請填寫分類名稱' }, 400];
+    const sort = Number.isInteger(Number(body.sort)) && body.sort !== undefined && body.sort !== '' ? Number(body.sort) : current.sort;
+    await env.DB.prepare('UPDATE categories SET name = ?, sort = ? WHERE id = ?').bind(name, sort, current.id).run();
+    return [{ categories: await listCategories(env) }, 200];
+  }
+  if (catMatch && catMatch[1] && request.method === 'DELETE') {
+    const current = await env.DB.prepare('SELECT * FROM categories WHERE id = ?').bind(Number(catMatch[1])).first();
+    if (!current) return [{ error: '找不到這個分類' }, 404];
+    const column = current.kind === 'stone' ? 'stone' : 'cat';
+    const used = await env.DB.prepare(`SELECT COUNT(*) AS n FROM products WHERE ${column} = ?`).bind(current.slug).first();
+    if (used.n) return [{ error: '還有 ' + used.n + ' 件貨品在「' + current.name + '」，請先把它們改到其他分類' }, 409];
+    await env.DB.prepare('DELETE FROM categories WHERE id = ?').bind(current.id).run();
+    return [{ categories: await listCategories(env) }, 200];
   }
 
   if (path === '/api/admin/images' && request.method === 'POST') {
@@ -575,7 +619,7 @@ async function admin(request, url, env, ctx) {
   const productMatch = path.match(/^\/api\/admin\/products(?:\/(\d+))?$/);
   if (productMatch && (request.method === 'POST' || request.method === 'PUT')) {
     const body = await request.json().catch(() => ({}));
-    const [fields, problem] = productIn(body);
+    const [fields, problem] = productIn(body, await listCategories(env));
     if (!fields) return [{ error: problem }, 400];
     if (request.method === 'POST' && !productMatch[1]) {
       const saved = await env.DB.prepare(
@@ -749,7 +793,7 @@ export default {
       } else if (url.pathname === '/api/bookings/payment' && request.method === 'POST') {
         result = await reportPayment(await request.json().catch(() => ({})), env, ctx);
       } else if (url.pathname === '/api/products' && request.method === 'GET') {
-        return json({ products: await listProducts(env, url.origin, false), shipping: SHOP.shipping, maxQtyPerItem: SHOP.maxQtyPerItem, points: SHOP.points }, 200, { ...headers, 'Cache-Control': 'public, max-age=60' });
+        return json({ products: await listProducts(env, url.origin, false), categories: await listCategories(env), shipping: SHOP.shipping, maxQtyPerItem: SHOP.maxQtyPerItem, points: SHOP.points }, 200, { ...headers, 'Cache-Control': 'public, max-age=60' });
       } else if (url.pathname === '/api/orders' && request.method === 'POST') {
         result = await createOrder(await request.json().catch(() => ({})), env, ctx);
       } else if (url.pathname === '/api/orders/payment' && request.method === 'POST') {
