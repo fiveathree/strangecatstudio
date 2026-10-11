@@ -63,6 +63,10 @@ async def collect_text():
         browser = await p.chromium.launch()
         page = await browser.new_page()
         for html in sorted(ROOT.glob('*.html')):
+            # The back office is only used by the studio: any character it needs beyond what
+            # the public pages use falls back to the device's own font, keeping the files small.
+            if html.name == 'admin.html':
+                continue
             await page.goto(html.as_uri())
             await page.wait_for_timeout(300)
             found = await page.evaluate(COLLECT)
@@ -96,7 +100,7 @@ def main():
     # Text that scripts add after load (booking widget, admin page) is not in
     # the page yet when it is scanned, so take it from the script sources.
     scripted = set()
-    for src in list((ROOT / 'js').glob('*.js')) + [ROOT / 'admin.html']:
+    for src in list((ROOT / 'js').glob('*.js')):
         scripted.update(ch for ch in src.read_text(encoding='utf-8') if ord(ch) > 0x2E7F)
     buckets['sans-regular'] |= scripted
     buckets['sans-bold'] |= scripted
