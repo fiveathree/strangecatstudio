@@ -212,9 +212,12 @@ if (process.argv[2] === 'serve') {
   assert.equal(cust.orders, 1);
   assert.equal(cust.spent, 2560);
   assert.ok(r.data.customers.find((c) => c.phone === person.phone).bookings >= 1, 'bookings create customers too');
-  assert.equal((await call('PUT', '/api/admin/customers/0911222333', { note: '喜歡藍色' }, 'test-token')).status, 200);
+  assert.equal((await call('PUT', '/api/admin/customers/0911222333', { name: '買家', note: '喜歡藍色', tags: 'VIP， 寵物紀念,VIP', birthday: '03-15' }, 'test-token')).status, 200);
+  assert.equal((await call('PUT', '/api/admin/customers/0911222333', { name: '買家', birthday: '13-40' }, 'test-token')).status, 400);
   r = await call('GET', '/api/admin/customers/0911222333', null, 'test-token');
   assert.equal(r.data.customer.note, '喜歡藍色');
+  assert.equal(r.data.customer.tags, 'VIP,寵物紀念');
+  assert.equal(r.data.points, 25, 'NT$2,500 of goods paid for earns 25 points');
   assert.equal(r.data.orders[0].items.length, 2);
 
   // Cancelling gives the stock back, once, and is final.
@@ -224,6 +227,48 @@ if (process.argv[2] === 'serve') {
   assert.equal(r.data.products.find((p) => p.id === ring.id).stock, 2);
   assert.equal(r.data.products.find((p) => p.id === loose.id).stock, null);
   assert.equal((await call('PATCH', `/api/admin/orders/${ord.id}`, { status: 'paid' }, 'test-token')).status, 400);
+
+  // ---- Points ----
+  r = await call('GET', '/api/admin/customers/0911222333', null, 'test-token');
+  assert.equal(r.data.points, 0, 'a cancelled order takes its points back');
+  await call('POST', '/api/admin/customers/0911222333/points', { delta: 300, reason: '體驗課回饋' }, 'test-token');
+  assert.equal((await call('POST', '/api/admin/customers/0911222333/points', { delta: -999 }, 'test-token')).status, 400, 'never below zero');
+  assert.equal((await call('POST', '/api/points/balance', { phone: '0911222333', code: 'WRONG1' })).status, 404);
+  assert.equal((await call('POST', '/api/points/balance', { phone: '0911222333', code: orderCode })).data.points, 300);
+  const spend = { ...buyer, shipMethod: 'tn', shipTo: '', items: [{ id: loose.id, qty: 1 }], marketing: true };
+  assert.equal((await call('POST', '/api/orders', { ...spend, pointsUse: 100, pointsCode: 'WRONG1' })).status, 400, 'points need proof');
+  assert.equal((await call('POST', '/api/orders', { ...spend, items: [{ id: ring.id, qty: 1 }], pointsUse: 5000, pointsCode: orderCode })).status, 409, 'not that many points');
+  r = await call('GET', '/api/admin/products', null, 'test-token');
+  assert.equal(r.data.products.find((p) => p.id === ring.id).stock, 2, 'a refused order leaves the stock alone');
+  r = await call('POST', '/api/orders', { ...spend, pointsUse: 300, pointsCode: orderCode });
+  assert.equal(r.status, 201);
+  assert.equal(r.data.discount, 300);
+  assert.equal(r.data.total, 200);
+  assert.equal(r.data.willEarn, 2);
+  r = await call('GET', '/api/admin/orders', null, 'test-token');
+  const second = r.data.orders[0];
+  r = await call('PATCH', `/api/admin/orders/${second.id}`, { status: 'paid' }, 'test-token');
+  assert.equal(r.data.order.points_earned, 2);
+  await call('PATCH', `/api/admin/orders/${second.id}`, { status: 'shipped' }, 'test-token');
+  r = await call('GET', '/api/admin/customers/0911222333', null, 'test-token');
+  assert.equal(r.data.points, 2, 'spent 300, earned 2, and only once');
+  assert.equal(r.data.customer.marketing, 1);
+  await call('PATCH', `/api/admin/orders/${second.id}`, { status: 'cancelled' }, 'test-token');
+  assert.equal((await call('GET', '/api/admin/customers/0911222333', null, 'test-token')).data.points, 300, 'cancelling gives the spent points back');
+
+  // Adding a customer by hand, and the report.
+  assert.equal((await call('POST', '/api/admin/customers', { name: '現場客', phone: '0955-000-111', tags: '台南' }, 'test-token')).status, 201);
+  assert.equal((await call('POST', '/api/admin/customers', { name: '現場客', phone: '0955000111' }, 'test-token')).status, 409);
+  assert.equal((await call('GET', '/api/admin/report')).status, 401);
+  const third = (await call('POST', '/api/orders', { ...spend, items: [{ id: ring.id, qty: 1 }] })).data;
+  r = await call('GET', '/api/admin/orders', null, 'test-token');
+  await call('PATCH', `/api/admin/orders/${r.data.orders[0].id}`, { status: 'paid' }, 'test-token');
+  r = await call('GET', '/api/admin/report', null, 'test-token');
+  assert.equal(r.data.totals.revenue, third.total);
+  assert.equal(r.data.totals.paid_orders, 1);
+  assert.equal(r.data.top[0].name, '現貨戒指');
+  assert.equal(r.data.months[0].revenue, third.total);
+  assert.ok(r.data.months.some((m) => m.bookings > 0));
 
   console.log('all booking checks passed');
 }

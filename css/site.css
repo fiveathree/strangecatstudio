@@ -509,3 +509,14 @@ button { cursor: pointer; }
 .admin-detail { padding: 20px; margin: 0 0 24px; background: var(--card); border: 1px solid var(--line2); display: flex; flex-direction: column; gap: 12px; font-size: 14px; color: var(--soft); }
 .admin-detail textarea { min-height: 80px; padding: 12px; font: inherit; font-size: 16px; border: 1px solid var(--line2); border-radius: 6px; }
 .admin-detail ul { margin: 0; padding-left: 18px; }
+
+/* ---- Admin: customers, points and report ---- */
+.admin-tag { margin-left: 8px; font-weight: 400; vertical-align: middle; }
+.admin-detail .bk-form { color: var(--ink); }
+.admin-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.admin-tile { display: flex; flex-direction: column; gap: 4px; padding: 16px; background: var(--card); border: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.admin-tile strong { font-size: 22px; font-weight: 500; color: var(--ink); }
+.cart-points { padding: 16px; border: 1px solid var(--line2); display: flex; flex-direction: column; gap: 10px; }
+.cart-points .bk-pay { margin: 0; }
+.cart-check { display: flex; align-items: flex-start; gap: 10px; color: var(--soft); font-size: 14px; }
+.cart-check input { width: 20px; height: 20px; flex: 0 0 auto; margin-top: 2px; }

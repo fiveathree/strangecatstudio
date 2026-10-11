@@ -65,12 +65,29 @@
 </div>
 </div>
 
+<div class="cart-points" id="cart-points" hidden>
+<div class="filter-title" style="margin: 0">使用積分</div>
+<p class="bk-hint" style="margin: 0" id="cart-points-hint"></p>
+<div class="bk-pay" id="cart-points-check">
+<input id="cart-points-code" type="text" maxlength="12" placeholder="過往訂單編號" aria-label="過往訂單編號" style="width: 170px; letter-spacing: 0">
+<button type="button" class="bk-submit" id="cart-points-go">查詢積分</button>
+</div>
+<div class="bk-pay" id="cart-points-use" hidden>
+<input id="cart-points-n" type="number" inputmode="numeric" min="0" step="1" aria-label="使用積分數量" style="letter-spacing: 0">
+<span id="cart-points-have" style="align-self: center; color: var(--soft)"></span>
+</div>
+<p id="cart-points-error" class="bk-error" role="alert" hidden style="margin: 0"></p>
+</div>
+
 <dl class="cart-total">
 <div><dt>商品小計</dt><dd id="cart-subtotal"></dd></div>
+<div id="cart-discount-row" hidden><dt>積分折抵</dt><dd id="cart-discount"></dd></div>
 <div><dt>運費</dt><dd id="cart-fee"></dd></div>
 <div class="cart-grand"><dt>合計</dt><dd id="cart-grand"></dd></div>
 </dl>
 
+<label class="cart-check"><input id="cart-marketing" type="checkbox"> 我願意收到奇怪貓工作室的新品與活動消息（可隨時用 LINE 告知取消）</label>
+<p id="cart-earn" class="bk-hint" style="margin: 0"></p>
 <p id="cart-error" class="bk-error" role="alert" hidden></p>
 <button type="submit" class="bk-submit" id="cart-submit">送出訂單</button>
 <p class="bk-hint">付款方式：銀行轉帳。送出後會顯示訂單編號，匯款後回報帳號末五碼，工作室確認後出貨。<br>你填寫的資料只用於處理這筆訂單與聯絡。</p>

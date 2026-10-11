@@ -77,6 +77,9 @@ CREATE TABLE IF NOT EXISTS orders (
   ship_to      TEXT,                       -- store name or address
   note         TEXT,
   subtotal     INTEGER NOT NULL,
+  discount     INTEGER NOT NULL DEFAULT 0, -- NT$ taken off by spending points
+  points_used  INTEGER NOT NULL DEFAULT 0,
+  points_earned INTEGER NOT NULL DEFAULT 0, -- given when the order was marked paid
   ship_fee     INTEGER NOT NULL,
   total        INTEGER NOT NULL,
   -- pending | reported | paid | shipped | done | cancelled
@@ -104,6 +107,20 @@ CREATE TABLE IF NOT EXISTS customers (
   email       TEXT,
   line_id     TEXT,
   note        TEXT,                        -- the studio's own notes
+  tags        TEXT,                        -- comma-separated labels, e.g. VIP,寵物紀念
+  birthday    TEXT,                        -- MM-DD
+  marketing   INTEGER NOT NULL DEFAULT 0,  -- 1 = agreed to hear about new work and events
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL
 );
+
+-- Loyalty points ledger: a customer's balance is the sum of their rows.
+CREATE TABLE IF NOT EXISTS points (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  phone       TEXT NOT NULL,
+  delta       INTEGER NOT NULL,            -- + earned or given, - spent or taken back
+  reason      TEXT,
+  order_id    INTEGER,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS points_phone ON points (phone);

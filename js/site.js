@@ -250,7 +250,7 @@
         buy.className = 'p-buy';
         buy.textContent = '加入購物車';
         buy.addEventListener('click', function () {
-          window.sscCart.add(p.id, p.stock == null ? null : p.stock);
+          window.sscCart.add(p.id, p.stock == null ? null : p.stock, p);
           buy.textContent = '已加入 ✓';
           setTimeout(function () { buy.textContent = '加入購物車'; }, 1400);
         });

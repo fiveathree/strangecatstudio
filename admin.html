@@ -32,6 +32,7 @@
 <button type="button" class="chip" role="tab" data-tab="orders" aria-pressed="false">訂單</button>
 <button type="button" class="chip" role="tab" data-tab="products" aria-pressed="false">貨品</button>
 <button type="button" class="chip" role="tab" data-tab="customers" aria-pressed="false">客人</button>
+<button type="button" class="chip" role="tab" data-tab="report" aria-pressed="false">報表</button>
 <button type="button" class="chip" role="tab" data-tab="settings" aria-pressed="false">設定</button>
 </div>
 
@@ -60,11 +61,33 @@
 
 <section id="tab-customers" hidden>
 <div class="admin-bar">
-<input id="cu-search" type="search" placeholder="搜尋姓名、電話、LINE" aria-label="搜尋客人" style="flex: 1 1 240px">
+<input id="cu-search" type="search" placeholder="搜尋姓名、電話、LINE、標籤" aria-label="搜尋客人" style="flex: 1 1 240px">
+<button type="button" class="chip" id="cu-new" aria-pressed="true">＋ 新增客人</button>
+<button type="button" class="chip" id="cu-export">匯出 CSV</button>
+</div>
+<div class="admin-bar">
+<div class="chip-row" id="cu-filter">
+<button type="button" class="chip" data-value="all" aria-pressed="true">全部</button>
+<button type="button" class="chip" data-value="buyers" aria-pressed="false">買過</button>
+<button type="button" class="chip" data-value="repeat" aria-pressed="false">回頭客</button>
+<button type="button" class="chip" data-value="points" aria-pressed="false">有積分</button>
+<button type="button" class="chip" data-value="birthday" aria-pressed="false">本月生日</button>
+<button type="button" class="chip" data-value="quiet" aria-pressed="false">半年沒來</button>
+<button type="button" class="chip" data-value="marketing" aria-pressed="false">可發消息</button>
+</div>
 <span id="cu-summary" style="color: var(--muted)"></span>
 </div>
 <div id="cu-detail" class="admin-detail" hidden></div>
 <div id="cu-list" class="admin-products"></div>
+</section>
+
+<section id="tab-report" hidden>
+<div id="r-tiles" class="admin-tiles"></div>
+<h2 class="h-serif" style="font-size: 24px; margin: 36px 0 10px">每月</h2>
+<div class="admin-table"><table id="r-months"></table></div>
+<h2 class="h-serif" style="font-size: 24px; margin: 36px 0 10px">最賣的貨品</h2>
+<div class="admin-table"><table id="r-top"></table></div>
+<p class="bk-hint">營業額只計已確認收款的訂單（含運費，已扣積分折抵），不包括體驗課收入。網站流量請到 Google Analytics 查看。</p>
 </section>
 
 <section id="tab-products" hidden>
@@ -229,6 +252,7 @@
       loadProducts();
       loadOrders();
       loadCustomers();
+      loadReport();
     }).catch(function (err) {
       $('login').hidden = false;
       $('panel').hidden = true;
@@ -274,6 +298,8 @@
         $('tab-' + t.getAttribute('data-tab')).hidden = !on;
       });
       try { sessionStorage.setItem('ssc-admin-tab', tab.getAttribute('data-tab')); } catch (e) {}
+      // Figures move whenever anything else changes, so the report is fetched fresh each time it is opened.
+      if (tab.getAttribute('data-tab') === 'report' && token) loadReport();
     });
   });
   try {
@@ -454,7 +480,7 @@
   var money = function (n) { return 'NT$' + Number(n).toLocaleString('en-US'); };
 
   function patchOrder(o, body) {
-    return api('PATCH', '/api/admin/orders/' + o.id, body).then(function () { loadOrders(); loadProducts(); });
+    return api('PATCH', '/api/admin/orders/' + o.id, body).then(function () { loadOrders(); loadProducts(); loadCustomers(); loadReport(); });
   }
 
   function orderCard(o) {
@@ -473,7 +499,8 @@
     o.items.forEach(function (it) { ul.appendChild(cell('li', it.name + ' × ' + it.qty + '　' + money(it.price * it.qty))); });
     card.appendChild(ul);
     card.appendChild(cell('div', (shipping[o.ship_method] ? shipping[o.ship_method].name : o.ship_method) + (o.ship_to ? '：' + o.ship_to : '') +
-      '　運費 ' + money(o.ship_fee) + '　合計 ' + money(o.total)));
+      (o.discount ? '　積分折抵 −' + money(o.discount) : '') + '　運費 ' + money(o.ship_fee) + '　合計 ' + money(o.total) +
+      (o.points_earned ? '　已回饋 ' + o.points_earned + ' 點' : '')));
     if (o.pay_last5) card.appendChild(cell('div', '匯款末五碼：' + o.pay_last5));
     if (o.email) card.appendChild(cell('div', 'Email：' + o.email));
     if (o.note) card.appendChild(cell('div', '客人備註：' + o.note));
@@ -543,23 +570,48 @@
 
   // ---- Customers ----
   var customers = [];
+  var customerFilter = 'all';
+  var today = day(new Date().toISOString());
+  var monthsAgo = function (n) { var d = new Date(today + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() - n); return d.toISOString().slice(0, 10); };
+  var FILTERS = {
+    all: function () { return true; },
+    buyers: function (c) { return c.orders > 0; },
+    repeat: function (c) { return c.orders + c.bookings > 1; },
+    points: function (c) { return c.points > 0; },
+    birthday: function (c) { return (c.birthday || '').slice(0, 2) === today.slice(5, 7); },
+    quiet: function (c) { return c.last_seen && c.last_seen < monthsAgo(6); },
+    marketing: function (c) { return c.marketing === 1; },
+  };
+
+  function shownCustomers() {
+    var q = $('cu-search').value.trim().toLowerCase();
+    return customers.filter(function (c) {
+      return FILTERS[customerFilter](c) &&
+        (!q || [c.name, c.phone, c.line_id, c.email, c.note, c.tags].join(' ').toLowerCase().indexOf(q) !== -1);
+    });
+  }
 
   function renderCustomers() {
-    var q = $('cu-search').value.trim().toLowerCase();
     var list = $('cu-list');
     list.textContent = '';
-    var shown = customers.filter(function (c) {
-      return !q || [c.name, c.phone, c.line_id, c.email, c.note].join(' ').toLowerCase().indexOf(q) !== -1;
-    });
-    $('cu-summary').textContent = '共 ' + customers.length + ' 位';
+    var shown = shownCustomers();
+    $('cu-summary').textContent = shown.length + ' / ' + customers.length + ' 位';
     shown.forEach(function (c) {
       var row = document.createElement('div');
       row.className = 'admin-product admin-customer';
       var info = document.createElement('div');
       info.className = 'admin-product-info';
-      info.appendChild(cell('strong', c.name));
+      var name = cell('strong', c.name);
+      (c.tags || '').split(',').filter(Boolean).forEach(function (t) {
+        var tag = cell('span', t);
+        tag.className = 'badge admin-tag';
+        name.appendChild(tag);
+      });
+      info.appendChild(name);
       info.appendChild(cell('span', c.phone + (c.line_id ? '　LINE ' + c.line_id : '')));
-      info.appendChild(cell('span', '訂單 ' + c.orders + ' 筆' + (c.spent ? '（' + money(c.spent) + '）' : '') + '　預約 ' + c.bookings + ' 次' + (c.note ? '　📝 ' + c.note : '')));
+      info.appendChild(cell('span', '訂單 ' + c.orders + (c.spent ? '（' + money(c.spent) + '）' : '') + '　預約 ' + c.bookings + '　積分 ' + c.points +
+        (c.last_seen ? '　最近 ' + c.last_seen : '')));
+      if (c.note) info.appendChild(cell('span', '📝 ' + c.note));
       row.appendChild(info);
       var open = document.createElement('button');
       open.type = 'button'; open.className = 'chip'; open.textContent = '查看';
@@ -570,35 +622,103 @@
     if (!shown.length) list.textContent = customers.length ? '找不到符合的客人。' : '還沒有客人資料，有人下單或預約後會自動出現。';
   }
 
-  function openCustomer(phone) {
-    api('GET', '/api/admin/customers/' + encodeURIComponent(phone)).then(function (data) {
-      var c = data.customer;
-      var box = $('cu-detail');
-      box.textContent = '';
-      var h = cell('h2', c.name);
-      h.className = 'h-serif';
-      h.style.cssText = 'font-size: 24px; margin: 0; color: var(--ink)';
-      box.appendChild(h);
-      box.appendChild(cell('div', '電話 ' + c.phone + (c.line_id ? '　LINE ' + c.line_id : '') + (c.email ? '　' + c.email : '')));
-      box.appendChild(cell('div', '首次紀錄 ' + day(c.created_at)));
-      var note = document.createElement('textarea');
-      note.maxLength = 500; note.placeholder = '備註（例如：戒圍 12、喜歡藍色、寵物名字）'; note.value = c.note || '';
-      note.setAttribute('aria-label', '客人備註');
-      box.appendChild(note);
-      var bar = document.createElement('div');
-      bar.className = 'admin-bar';
-      bar.style.margin = '0';
-      var save = document.createElement('button');
-      save.type = 'button'; save.className = 'chip'; save.textContent = '儲存備註'; save.setAttribute('aria-pressed', 'true');
-      var status = cell('span', '');
-      save.addEventListener('click', function () {
-        api('PUT', '/api/admin/customers/' + encodeURIComponent(c.phone), { note: note.value }).then(function () { status.textContent = '已儲存'; loadCustomers(); });
+  function field(label, input) {
+    var wrap = document.createElement('div');
+    wrap.className = 'bk-input';
+    var l = cell('label', label);
+    wrap.appendChild(l);
+    wrap.appendChild(input);
+    return wrap;
+  }
+  function textInput(value, max, placeholder) {
+    var i = document.createElement('input');
+    i.type = 'text'; i.maxLength = max; i.value = value || ''; i.placeholder = placeholder || '';
+    return i;
+  }
+
+  // The same form edits an existing customer (c) or adds a new one (c = null).
+  function customerForm(c, data) {
+    var box = $('cu-detail');
+    box.textContent = '';
+    var h = cell('h2', c ? c.name : '新增客人');
+    h.className = 'h-serif';
+    h.style.cssText = 'font-size: 24px; margin: 0; color: var(--ink)';
+    box.appendChild(h);
+    if (c) box.appendChild(cell('div', '首次紀錄 ' + day(c.created_at) + '　積分 ' + data.points + ' 點'));
+
+    var name = textInput(c && c.name, 40);
+    var phone = textInput(c && c.phone, 20);
+    phone.inputMode = 'tel';
+    phone.disabled = Boolean(c); // the phone is how orders and bookings find this customer
+    var email = textInput(c && c.email, 80);
+    var line = textInput(c && c.line_id, 40);
+    var tags = textInput(c && (c.tags || '').split(',').join('、'), 200, '例如：VIP、寵物紀念、情侶');
+    var birthday = textInput(c && c.birthday, 5, 'MM-DD，例如 03-15');
+    var note = document.createElement('textarea');
+    note.maxLength = 500; note.placeholder = '例如：戒圍 12、喜歡藍色、寵物名字'; note.value = (c && c.note) || '';
+    var marketing = document.createElement('input');
+    marketing.type = 'checkbox'; marketing.checked = Boolean(c && c.marketing);
+    var mk = document.createElement('label');
+    mk.className = 'admin-check';
+    mk.appendChild(marketing);
+    mk.appendChild(document.createTextNode(' 同意收到新品與活動消息'));
+    var grid = document.createElement('div');
+    grid.className = 'bk-form';
+    [field('姓名', name), field('電話', phone), field('Email', email), field('LINE ID', line), field('標籤', tags), field('生日', birthday)].forEach(function (f) { grid.appendChild(f); });
+    var wide = field('備註', note);
+    wide.className += ' bk-input-wide';
+    grid.appendChild(wide);
+    grid.appendChild(mk);
+    box.appendChild(grid);
+
+    var bar = document.createElement('div');
+    bar.className = 'admin-bar';
+    bar.style.margin = '0';
+    var save = document.createElement('button');
+    save.type = 'button'; save.className = 'chip'; save.textContent = '儲存'; save.setAttribute('aria-pressed', 'true');
+    var status = cell('span', '');
+    save.addEventListener('click', function () {
+      var body = { name: name.value, phone: phone.value, email: email.value, line_id: line.value, tags: tags.value, birthday: birthday.value, note: note.value, marketing: marketing.checked };
+      status.textContent = '儲存中…';
+      (c ? api('PUT', '/api/admin/customers/' + encodeURIComponent(c.phone), body) : api('POST', '/api/admin/customers', body)).then(function (res) {
+        status.textContent = '已儲存';
+        loadCustomers();
+        if (!c) openCustomer(res.phone);
+      }).catch(function (err) { status.textContent = err.message; });
+    });
+    var close = document.createElement('button');
+    close.type = 'button'; close.className = 'chip'; close.textContent = '關閉';
+    close.addEventListener('click', function () { box.hidden = true; });
+    bar.appendChild(save); bar.appendChild(close); bar.appendChild(status);
+    box.appendChild(bar);
+
+    if (c) {
+      // Points: give or take by hand, then the history.
+      box.appendChild(cell('strong', '積分（' + data.points + ' 點）'));
+      var pbar = document.createElement('div');
+      pbar.className = 'admin-bar';
+      pbar.style.margin = '0';
+      var delta = document.createElement('input');
+      delta.type = 'number'; delta.step = '1'; delta.placeholder = '＋加 或 −扣'; delta.style.width = '130px';
+      delta.setAttribute('aria-label', '積分增減');
+      var reason = textInput('', 60, '原因（例如：體驗課回饋、生日禮）');
+      reason.style.flex = '1 1 180px';
+      var give = document.createElement('button');
+      give.type = 'button'; give.className = 'chip'; give.textContent = '調整積分';
+      var pstatus = cell('span', '');
+      give.addEventListener('click', function () {
+        api('POST', '/api/admin/customers/' + encodeURIComponent(c.phone) + '/points', { delta: Number(delta.value), reason: reason.value })
+          .then(function () { loadCustomers(); openCustomer(c.phone); })
+          .catch(function (err) { pstatus.textContent = err.message; });
       });
-      var close = document.createElement('button');
-      close.type = 'button'; close.className = 'chip'; close.textContent = '關閉';
-      close.addEventListener('click', function () { box.hidden = true; });
-      bar.appendChild(save); bar.appendChild(close); bar.appendChild(status);
-      box.appendChild(bar);
+      pbar.appendChild(delta); pbar.appendChild(reason); pbar.appendChild(give); pbar.appendChild(pstatus);
+      box.appendChild(pbar);
+      if (data.ledger.length) {
+        var pl = document.createElement('ul');
+        data.ledger.forEach(function (e) { pl.appendChild(cell('li', day(e.created_at) + '　' + (e.delta > 0 ? '+' : '') + e.delta + '　' + (e.reason || ''))); });
+        box.appendChild(pl);
+      }
+
       box.appendChild(cell('strong', '訂單（' + data.orders.length + '）'));
       var ol = document.createElement('ul');
       data.orders.forEach(function (o) {
@@ -612,9 +732,13 @@
         bl.appendChild(cell('li', b.date + ' ' + b.time + '　' + STUDIO[b.studio] + ' ' + TYPE[b.type] + '　' + b.people + ' 位　' + STATUS[b.status]));
       });
       if (data.bookings.length) box.appendChild(bl);
-      box.hidden = false;
-      box.scrollIntoView({ block: 'start' });
-    });
+    }
+    box.hidden = false;
+    box.scrollIntoView({ block: 'start' });
+  }
+
+  function openCustomer(phone) {
+    api('GET', '/api/admin/customers/' + encodeURIComponent(phone)).then(function (data) { customerForm(data.customer, data); });
   }
 
   function loadCustomers() {
@@ -624,6 +748,70 @@
     });
   }
   $('cu-search').addEventListener('input', renderCustomers);
+  $('cu-new').addEventListener('click', function () { customerForm(null, null); });
+  document.querySelectorAll('#cu-filter .chip').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      customerFilter = chip.getAttribute('data-value');
+      document.querySelectorAll('#cu-filter .chip').forEach(function (c) { c.setAttribute('aria-pressed', c === chip ? 'true' : 'false'); });
+      renderCustomers();
+    });
+  });
+  // The list as shown (after search and filter), ready for Excel or a LINE/Email tool.
+  $('cu-export').addEventListener('click', function () {
+    var quote = function (v) {
+      v = v == null ? '' : String(v);
+      // A leading = + - @ would be run as a formula by spreadsheet programs.
+      if (/^[=+\-@]/.test(v)) v = "'" + v;
+      return '"' + v.replace(/"/g, '""') + '"';
+    };
+    var rows = [['姓名', '電話', 'Email', 'LINE', '標籤', '生日', '訂單數', '消費', '預約數', '積分', '最近', '同意收消息', '備註']];
+    shownCustomers().forEach(function (c) {
+      rows.push([c.name, c.phone, c.email, c.line_id, c.tags, c.birthday, c.orders, c.spent, c.bookings, c.points, c.last_seen, c.marketing ? '是' : '', c.note]);
+    });
+    var blob = new Blob(['﻿' + rows.map(function (r) { return r.map(quote).join(','); }).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'customers-' + today + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  });
+
+  // ---- Report ----
+  function table(id, head, rows) {
+    var t = $(id);
+    t.textContent = '';
+    var tr = document.createElement('tr');
+    head.forEach(function (h) { tr.appendChild(cell('th', h)); });
+    t.appendChild(tr);
+    rows.forEach(function (r) {
+      var row = document.createElement('tr');
+      r.forEach(function (v) { row.appendChild(cell('td', v)); });
+      t.appendChild(row);
+    });
+    if (!rows.length) { var e = document.createElement('tr'); var td = cell('td', '還沒有資料'); td.colSpan = head.length; e.appendChild(td); t.appendChild(e); }
+  }
+
+  function loadReport() {
+    return api('GET', '/api/admin/report').then(function (data) {
+      var t = data.totals;
+      var tiles = $('r-tiles');
+      tiles.textContent = '';
+      [['累計營業額', money(t.revenue)], ['已收款訂單', t.paid_orders], ['平均客單', t.paid_orders ? money(Math.round(t.revenue / t.paid_orders)) : '—'],
+        ['待收款訂單', t.unpaid_orders], ['客人總數', t.customers], ['回購率', t.buyers ? Math.round(t.repeat_buyers / t.buyers * 100) + '%' : '—'],
+        ['未用積分', t.points_outstanding + ' 點']].forEach(function (x) {
+        var tile = document.createElement('div');
+        tile.className = 'admin-tile';
+        tile.appendChild(cell('span', x[0]));
+        tile.appendChild(cell('strong', x[1]));
+        tiles.appendChild(tile);
+      });
+      table('r-months', ['月份', '營業額', '已收款訂單', '全部訂單', '預約', '預約人數', '新客人'], data.months.map(function (m) {
+        return [m.month, money(m.revenue), m.paid_orders, m.orders, m.bookings, m.people, m.customers];
+      }));
+      table('r-top', ['貨品', '售出', '營業額'], data.top.map(function (p) { return [p.name, p.qty, money(p.revenue)]; }));
+    });
+  }
 
   if (!API) {
     var box = $('login-error');

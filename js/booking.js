@@ -170,6 +170,7 @@
       studio: state.studio, date: state.date, time: state.time, type: state.type, people: state.people,
       name: value('bk-name'), phone: phone, line: value('bk-line'), note: value('bk-note'),
     }).then(function (booking) {
+      if (window.sscTrack) window.sscTrack('generate_lead', { booking_type: booking.type, studio: booking.studio, people: booking.people });
       done(booking, phone);
     }).catch(function (err) {
       errorBox.textContent = err.message;

@@ -13,12 +13,15 @@
 //   GET/POST /api/admin/products, PUT/DELETE /api/admin/products/:id
 //   POST  /api/admin/images              (photo bytes) -> { id, url }
 //   GET   /api/admin/orders, PATCH /api/admin/orders/:id   { status, tracking, admin_note }
-//   GET   /api/admin/customers, GET/PUT /api/admin/customers/:phone
+//   GET/POST /api/admin/customers, GET/PUT /api/admin/customers/:phone
+//   POST  /api/admin/customers/:phone/points   { delta, reason }
+//   GET   /api/admin/report                    sales and customer figures
 // Public shop:
 //   GET  /api/products, GET /api/images/:id
 //   POST /api/orders                 place an order
 //   POST /api/orders/payment         report transfer's last five digits
 //   POST /api/orders/lookup          { code, phone } -> the customer's own order
+//   POST /api/points/balance         { code, phone } -> points the customer can spend
 
 // ---- Settings the studio is likely to change -------------------------------
 export const CONFIG = {
@@ -49,6 +52,10 @@ export const SHOP = {
     kh: { name: '高雄工作室自取', fee: 0 },
   },
   maxQtyPerItem: 10,
+  // Loyalty points: one point for every `earnPer` NT$ of goods (shipping excluded),
+  // given when the studio marks the order as paid. Each point is worth `pointValue` NT$
+  // off a later order. Set earnPer to 0 to switch points off.
+  points: { earnPer: 100, pointValue: 1 },
 };
 // -----------------------------------------------------------------------------
 
@@ -150,15 +157,40 @@ function notifyOrder(env, ctx, event, order) {
 }
 
 /** Keeps one record per customer, keyed by phone. Newer details replace older ones; blanks never erase. */
-async function rememberCustomer(env, { name, phone, email = '', line = '' }) {
+async function rememberCustomer(env, { name, phone, email = '', line = '', marketing = false }) {
   const now = new Date().toISOString();
+  // Agreeing to hear from the studio is only ever switched on here; the studio switches it off on request.
   await env.DB.prepare(
-    `INSERT INTO customers (phone, name, email, line_id, note, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, '', ?5, ?5)
+    `INSERT INTO customers (phone, name, email, line_id, note, tags, marketing, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, '', '', ?6, ?5, ?5)
      ON CONFLICT(phone) DO UPDATE SET name = ?2,
        email = CASE WHEN ?3 != '' THEN ?3 ELSE email END,
        line_id = CASE WHEN ?4 != '' THEN ?4 ELSE line_id END,
+       marketing = MAX(marketing, ?6),
        updated_at = ?5`
-  ).bind(phone, name, email, line, now).run();
+  ).bind(phone, name, email, line, now, marketing ? 1 : 0).run();
+}
+
+async function pointsBalance(env, phone) {
+  const row = await env.DB.prepare('SELECT COALESCE(SUM(delta), 0) AS n FROM points WHERE phone = ?').bind(phone).first();
+  return row.n;
+}
+
+async function addPoints(env, phone, delta, reason, orderId = null) {
+  if (!delta) return;
+  await env.DB.prepare('INSERT INTO points (phone, delta, reason, order_id, created_at) VALUES (?, ?, ?, ?, ?)')
+    .bind(phone, delta, reason, orderId, new Date().toISOString()).run();
+}
+
+/** Points are tied to a phone number, so spending them needs proof: the code of one of that phone's orders. */
+async function ownsOrder(env, phone, code) {
+  return Boolean(code && phone && await env.DB.prepare('SELECT 1 FROM orders WHERE code = ? AND phone = ?').bind(code, phone).first());
+}
+
+async function checkPoints(body, env) {
+  const phone = clean(body.phone, 20).replace(/[^\d+]/g, '');
+  const code = clean(body.code, 12).toUpperCase();
+  if (!await ownsOrder(env, phone, code)) return [{ error: '找不到這筆訂單，請確認訂單編號與手機' }, 404];
+  return [{ points: await pointsBalance(env, phone), pointValue: SHOP.points.pointValue }, 200];
 }
 
 function cors(env, request) {
@@ -386,26 +418,47 @@ async function createOrder(body, env, ctx) {
 
   const subtotal = lines.reduce((sum, l) => sum + l.price * l.qty, 0);
   const shipFee = SHOP.shipping[method].fee;
+
+  // Spending points: never more than the goods are worth, and only with a past order's code as proof.
+  let pointsUsed = 0;
+  const wantPoints = Number(body.pointsUse) || 0;
+  if (wantPoints) {
+    const fail = async (error, status) => { await putBackStock(env, taken); return [{ error }, status]; };
+    if (!Number.isInteger(wantPoints) || wantPoints < 0) return fail('積分數量不正確', 400);
+    if (!await ownsOrder(env, phone, clean(body.pointsCode, 12).toUpperCase())) return fail('積分驗證失敗：請確認過往訂單編號與手機', 400);
+    pointsUsed = Math.min(wantPoints, Math.floor(subtotal / SHOP.points.pointValue));
+    // The balance check lives inside the INSERT, so the same points can't be spent twice at once.
+    const spent = await env.DB.prepare(
+      `INSERT INTO points (phone, delta, reason, order_id, created_at)
+       SELECT ?1, -?2, '訂單折抵', NULL, ?3 WHERE (SELECT COALESCE(SUM(delta), 0) FROM points WHERE phone = ?1) >= ?2`
+    ).bind(phone, pointsUsed, new Date().toISOString()).run();
+    if (!spent.meta.changes) return fail('積分不足，請調整使用數量', 409);
+  }
+  const discount = pointsUsed * SHOP.points.pointValue;
+
   const order = {
     code: newCode(), name, phone, email, line_id: clean(body.line, 40), ship_method: method, ship_to: shipTo,
-    note: clean(body.note, 300), subtotal, ship_fee: shipFee, total: subtotal + shipFee, status: 'pending', created_at: new Date().toISOString(),
+    note: clean(body.note, 300), subtotal, discount, points_used: pointsUsed, ship_fee: shipFee, total: subtotal - discount + shipFee,
+    status: 'pending', created_at: new Date().toISOString(),
   };
   let saved;
   try {
     saved = await env.DB.prepare(
-      `INSERT INTO orders (code, name, phone, email, line_id, ship_method, ship_to, note, subtotal, ship_fee, total, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
-    ).bind(order.code, name, phone, email, order.line_id, method, shipTo, order.note, subtotal, shipFee, order.total, 'pending', order.created_at).first();
+      `INSERT INTO orders (code, name, phone, email, line_id, ship_method, ship_to, note, subtotal, discount, points_used, ship_fee, total, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
+    ).bind(order.code, name, phone, email, order.line_id, method, shipTo, order.note, subtotal, discount, pointsUsed, shipFee, order.total, 'pending', order.created_at).first();
     for (const l of lines) {
       await env.DB.prepare('INSERT INTO order_items (order_id, product_id, name, price, qty) VALUES (?, ?, ?, ?, ?)').bind(saved.id, l.product_id, l.name, l.price, l.qty).run();
     }
   } catch (err) {
     await putBackStock(env, taken);
+    await addPoints(env, phone, pointsUsed, '訂單未成立，退回積分');
     throw err;
   }
-  await rememberCustomer(env, { name, phone, email, line: order.line_id });
+  await rememberCustomer(env, { name, phone, email, line: order.line_id, marketing: Boolean(body.marketing) });
   notifyOrder(env, ctx, 'order', { ...order, items: lines });
-  return [{ code: order.code, items: lines, subtotal, shipFee, total: order.total, shipName: SHOP.shipping[method].name, status: 'pending' }, 201];
+  const willEarn = SHOP.points.earnPer ? Math.floor((subtotal - discount) / SHOP.points.earnPer) : 0;
+  return [{ code: order.code, items: lines, subtotal, discount, pointsUsed, shipFee, total: order.total, shipName: SHOP.shipping[method].name, status: 'pending', willEarn }, 201];
 }
 
 async function reportOrderPayment(body, env, ctx) {
@@ -428,8 +481,56 @@ async function lookupOrder(body, env) {
   const row = code && phone && await env.DB.prepare('SELECT * FROM orders WHERE code = ? AND phone = ?').bind(code, phone).first();
   if (!row) return [{ error: '找不到這筆訂單，請確認訂單編號與電話' }, 404];
   const o = await orderWithItems(env, row);
-  return [{ code: o.code, status: o.status, items: o.items, subtotal: o.subtotal, shipFee: o.ship_fee, total: o.total,
+  return [{ code: o.code, status: o.status, items: o.items, subtotal: o.subtotal, discount: o.discount, shipFee: o.ship_fee, total: o.total,
+    points: await pointsBalance(env, phone),
     shipName: SHOP.shipping[o.ship_method].name, shipTo: o.ship_to, tracking: o.tracking || '', paid: Boolean(o.pay_last5), date: taipeiToday(Date.parse(o.created_at)) }, 200];
+}
+
+/** Checks a customer record sent from the admin page; returns [fields] or [null, problem]. */
+function customerIn(body) {
+  const name = clean(body.name, 40);
+  if (!name) return [null, '請填寫姓名'];
+  const email = clean(body.email, 80);
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return [null, 'Email 格式不正確'];
+  const birthday = clean(body.birthday, 5);
+  if (birthday && !/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(birthday)) return [null, '生日請用 MM-DD，例如 03-15'];
+  // Tags are short labels separated by commas; duplicates and blanks are dropped.
+  const tags = [...new Set(clean(body.tags, 200).split(/[,，、]+/).map((t) => t.trim().slice(0, 12)).filter(Boolean))].slice(0, 8).join(',');
+  return [[name, email, clean(body.line_id, 40), clean(body.note, 500), tags, birthday, body.marketing ? 1 : 0]];
+}
+
+/** Money counts once the studio has confirmed it: paid, shipped or done. Months are Taipei time. */
+async function report(env) {
+  const month = "substr(datetime(created_at, '+8 hours'), 1, 7)";
+  const earned = "status IN ('paid', 'shipped', 'done')";
+  const byMonth = await env.DB.prepare(
+    `SELECT ${month} AS month, COUNT(*) AS orders, SUM(CASE WHEN ${earned} THEN 1 ELSE 0 END) AS paid_orders,
+       SUM(CASE WHEN ${earned} THEN total ELSE 0 END) AS revenue
+     FROM orders WHERE status != 'cancelled' GROUP BY month ORDER BY month DESC LIMIT 12`
+  ).all();
+  const bookingsByMonth = await env.DB.prepare(
+    "SELECT substr(date, 1, 7) AS month, COUNT(*) AS bookings, SUM(people) AS people FROM bookings WHERE status != 'cancelled' GROUP BY month ORDER BY month DESC LIMIT 12"
+  ).all();
+  const newByMonth = await env.DB.prepare(`SELECT ${month} AS month, COUNT(*) AS customers FROM customers GROUP BY month ORDER BY month DESC LIMIT 12`).all();
+  const top = await env.DB.prepare(
+    `SELECT i.name, SUM(i.qty) AS qty, SUM(i.qty * i.price) AS revenue FROM order_items i JOIN orders o ON o.id = i.order_id
+     WHERE o.${earned} GROUP BY i.product_id, i.name ORDER BY revenue DESC LIMIT 10`
+  ).all();
+  const totals = await env.DB.prepare(
+    `SELECT (SELECT COUNT(*) FROM customers) AS customers,
+       (SELECT COUNT(*) FROM (SELECT phone FROM orders WHERE ${earned} GROUP BY phone HAVING COUNT(*) > 1)) AS repeat_buyers,
+       (SELECT COUNT(DISTINCT phone) FROM orders WHERE ${earned}) AS buyers,
+       (SELECT COALESCE(SUM(total), 0) FROM orders WHERE ${earned}) AS revenue,
+       (SELECT COUNT(*) FROM orders WHERE ${earned}) AS paid_orders,
+       (SELECT COUNT(*) FROM orders WHERE status IN ('pending', 'reported')) AS unpaid_orders,
+       (SELECT COALESCE(SUM(delta), 0) FROM points) AS points_outstanding`
+  ).first();
+  const months = {};
+  const at = (m) => (months[m] = months[m] || { month: m, orders: 0, paid_orders: 0, revenue: 0, bookings: 0, people: 0, customers: 0 });
+  for (const r of byMonth.results) Object.assign(at(r.month), r);
+  for (const r of bookingsByMonth.results) Object.assign(at(r.month), r);
+  for (const r of newByMonth.results) Object.assign(at(r.month), r);
+  return { totals, months: Object.values(months).sort((a, b) => (a.month < b.month ? 1 : -1)).slice(0, 12), top: top.results };
 }
 
 function isAdmin(request, env) {
@@ -525,7 +626,23 @@ async function admin(request, url, env, ctx) {
     const adminNote = body.admin_note === undefined ? current.admin_note : clean(body.admin_note, 300);
     await env.DB.prepare('UPDATE orders SET status = ?, tracking = ?, admin_note = ? WHERE id = ?').bind(status, tracking, adminNote, id).run();
     const saved = await orderWithItems(env, await env.DB.prepare('SELECT * FROM orders WHERE id = ?').bind(id).first());
-    if (status === 'cancelled' && current.status !== 'cancelled') await putBackStock(env, saved.items);
+    if (status === 'cancelled' && current.status !== 'cancelled') {
+      await putBackStock(env, saved.items);
+      // Hand back what the customer spent, and take back what this order earned them.
+      await addPoints(env, current.phone, current.points_used, '訂單 ' + current.code + ' 取消，退回積分', id);
+      await addPoints(env, current.phone, -current.points_earned, '訂單 ' + current.code + ' 取消，收回積分', id);
+      await env.DB.prepare('UPDATE orders SET points_earned = 0 WHERE id = ?').bind(id).run();
+    }
+    // Points are earned once, the first time the studio confirms the money arrived.
+    const nowPaid = ['paid', 'shipped', 'done'].includes(status) && !['paid', 'shipped', 'done'].includes(current.status);
+    if (nowPaid && !current.points_earned && SHOP.points.earnPer) {
+      const earned = Math.floor((current.subtotal - current.discount) / SHOP.points.earnPer);
+      if (earned) {
+        await addPoints(env, current.phone, earned, '訂單 ' + current.code + ' 消費回饋', id);
+        await env.DB.prepare('UPDATE orders SET points_earned = ? WHERE id = ?').bind(earned, id).run();
+        saved.points_earned = earned;
+      }
+    }
     if (status !== current.status) notifyOrder(env, ctx, 'order_status', saved);
     return [{ order: saved }, 200];
   }
@@ -535,10 +652,27 @@ async function admin(request, url, env, ctx) {
       `SELECT c.*,
          (SELECT COUNT(*) FROM orders o WHERE o.phone = c.phone AND o.status != 'cancelled') AS orders,
          (SELECT COALESCE(SUM(total), 0) FROM orders o WHERE o.phone = c.phone AND o.status IN ('paid', 'shipped', 'done')) AS spent,
-         (SELECT COUNT(*) FROM bookings b WHERE b.phone = c.phone AND b.status != 'cancelled') AS bookings
-       FROM customers c ORDER BY c.updated_at DESC LIMIT 1000`
-    ).all();
-    return [{ customers: rows.results }, 200];
+         (SELECT COUNT(*) FROM bookings b WHERE b.phone = c.phone AND b.status != 'cancelled') AS bookings,
+         (SELECT COALESCE(SUM(delta), 0) FROM points p WHERE p.phone = c.phone) AS points,
+         MAX(COALESCE((SELECT MAX(substr(datetime(created_at, '+8 hours'), 1, 10)) FROM orders o WHERE o.phone = c.phone AND o.status != 'cancelled'), ''),
+             COALESCE((SELECT MAX(date) FROM bookings b WHERE b.phone = c.phone AND b.status != 'cancelled' AND b.date <= ?1), '')) AS last_seen
+       FROM customers c ORDER BY c.updated_at DESC LIMIT 2000`
+    ).bind(taipeiToday()).all();
+    return [{ customers: rows.results, points: SHOP.points }, 200];
+  }
+
+  // Adding someone by hand (a walk-in, an old customer from the notebook).
+  if (path === '/api/admin/customers' && request.method === 'POST') {
+    const body = await request.json().catch(() => ({}));
+    const [fields, problem] = customerIn(body);
+    if (!fields) return [{ error: problem }, 400];
+    const phone = clean(body.phone, 20).replace(/[^\d+]/g, '');
+    if (phone.length < 8) return [{ error: '請填寫電話' }, 400];
+    if (await env.DB.prepare('SELECT 1 FROM customers WHERE phone = ?').bind(phone).first()) return [{ error: '這個電話已經有客人資料' }, 409];
+    const now = new Date().toISOString();
+    await env.DB.prepare('INSERT INTO customers (name, email, line_id, note, tags, birthday, marketing, phone, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(...fields, phone, now, now).run();
+    return [{ ok: true, phone }, 201];
   }
 
   const customerMatch = path.match(/^\/api\/admin\/customers\/(\+?\d{6,20})$/);
@@ -547,12 +681,34 @@ async function admin(request, url, env, ctx) {
     if (!customer) return [{ error: '找不到這位客人' }, 404];
     const orders = await env.DB.prepare('SELECT * FROM orders WHERE phone = ? ORDER BY id DESC').bind(customer.phone).all();
     const bookings = await env.DB.prepare('SELECT * FROM bookings WHERE phone = ? ORDER BY date DESC, time DESC').bind(customer.phone).all();
-    return [{ customer, orders: await Promise.all(orders.results.map((o) => orderWithItems(env, o))), bookings: bookings.results }, 200];
+    const ledger = await env.DB.prepare('SELECT delta, reason, created_at FROM points WHERE phone = ? ORDER BY id DESC LIMIT 100').bind(customer.phone).all();
+    return [{ customer, orders: await Promise.all(orders.results.map((o) => orderWithItems(env, o))), bookings: bookings.results,
+      points: await pointsBalance(env, customer.phone), ledger: ledger.results }, 200];
   }
   if (customerMatch && request.method === 'PUT') {
     const body = await request.json().catch(() => ({}));
-    const r = await env.DB.prepare('UPDATE customers SET note = ? WHERE phone = ?').bind(clean(body.note, 500), customerMatch[1]).run();
+    const [fields, problem] = customerIn(body);
+    if (!fields) return [{ error: problem }, 400];
+    const r = await env.DB.prepare('UPDATE customers SET name = ?, email = ?, line_id = ?, note = ?, tags = ?, birthday = ?, marketing = ? WHERE phone = ?')
+      .bind(...fields, customerMatch[1]).run();
     return r.meta.changes ? [{ ok: true }, 200] : [{ error: '找不到這位客人' }, 404];
+  }
+
+  // Giving or taking points by hand (a class attended, a goodwill gift, a correction).
+  const pointsMatch = path.match(/^\/api\/admin\/customers\/(\+?\d{6,20})\/points$/);
+  if (pointsMatch && request.method === 'POST') {
+    const body = await request.json().catch(() => ({}));
+    const delta = Number(body.delta);
+    if (!Number.isInteger(delta) || !delta || Math.abs(delta) > 100000) return [{ error: '積分數量不正確' }, 400];
+    if (!await env.DB.prepare('SELECT 1 FROM customers WHERE phone = ?').bind(pointsMatch[1]).first()) return [{ error: '找不到這位客人' }, 404];
+    const balance = await pointsBalance(env, pointsMatch[1]);
+    if (balance + delta < 0) return [{ error: '積分不能扣到負數（目前 ' + balance + ' 點）' }, 400];
+    await addPoints(env, pointsMatch[1], delta, clean(body.reason, 60) || '工作室調整');
+    return [{ points: balance + delta }, 200];
+  }
+
+  if (path === '/api/admin/report' && request.method === 'GET') {
+    return [await report(env), 200];
   }
 
   if (path === '/api/admin/settings' && request.method === 'PUT') {
@@ -593,11 +749,13 @@ export default {
       } else if (url.pathname === '/api/bookings/payment' && request.method === 'POST') {
         result = await reportPayment(await request.json().catch(() => ({})), env, ctx);
       } else if (url.pathname === '/api/products' && request.method === 'GET') {
-        return json({ products: await listProducts(env, url.origin, false), shipping: SHOP.shipping, maxQtyPerItem: SHOP.maxQtyPerItem }, 200, { ...headers, 'Cache-Control': 'public, max-age=60' });
+        return json({ products: await listProducts(env, url.origin, false), shipping: SHOP.shipping, maxQtyPerItem: SHOP.maxQtyPerItem, points: SHOP.points }, 200, { ...headers, 'Cache-Control': 'public, max-age=60' });
       } else if (url.pathname === '/api/orders' && request.method === 'POST') {
         result = await createOrder(await request.json().catch(() => ({})), env, ctx);
       } else if (url.pathname === '/api/orders/payment' && request.method === 'POST') {
         result = await reportOrderPayment(await request.json().catch(() => ({})), env, ctx);
+      } else if (url.pathname === '/api/points/balance' && request.method === 'POST') {
+        result = await checkPoints(await request.json().catch(() => ({})), env);
       } else if (url.pathname === '/api/orders/lookup' && request.method === 'POST') {
         result = await lookupOrder(await request.json().catch(() => ({})), env);
       } else if (/^\/api\/images\/\d+$/.test(url.pathname) && request.method === 'GET') {

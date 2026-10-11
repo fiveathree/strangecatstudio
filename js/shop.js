@@ -30,7 +30,8 @@
 
   window.sscCart = {
     // `stock` is how many are left (null when the studio doesn't count them).
-    add: function (id, stock) {
+    add: function (id, stock, item) {
+      if (window.sscTrack && item) window.sscTrack('add_to_cart', { currency: 'TWD', value: item.price, items: [{ item_id: String(id), item_name: item.name, price: item.price, quantity: 1 }] });
       var cart = read();
       var next = (cart[id] || 0) + 1;
       cart[id] = stock == null ? next : Math.min(next, stock);
@@ -99,6 +100,9 @@
     var shipping = {};
     var maxQty = 10;
     var method = null;
+    var rules = { earnPer: 0, pointValue: 1 }; // loyalty points, from the API
+    var have = null;       // points this customer can spend, once they have proved who they are
+    var pointsCode = '';   // the past order code that proved it
 
     var show = function (which) {
       $('cart-loading').hidden = true;
@@ -141,9 +145,17 @@
         if (p && p.price != null) subtotal += p.price * cart[id];
       });
       var fee = method ? shipping[method].fee : 0;
+      // Points can pay for goods but not for shipping.
+      var use = have == null ? 0 : Math.max(0, Math.min(Math.floor(Number($('cart-points-n').value) || 0), have, Math.floor(subtotal / rules.pointValue)));
+      var discount = use * rules.pointValue;
+      form.pointsUse = use;
       $('cart-subtotal').textContent = money(subtotal);
+      $('cart-discount-row').hidden = !discount;
+      $('cart-discount').textContent = '−' + money(discount);
       $('cart-fee').textContent = method ? (fee ? money(fee) : '免運') : '請先選擇取貨方式';
-      $('cart-grand').textContent = money(subtotal + fee);
+      $('cart-grand').textContent = money(subtotal - discount + fee);
+      var earn = rules.earnPer ? Math.floor((subtotal - discount) / rules.earnPer) : 0;
+      $('cart-earn').textContent = earn ? '這筆訂單確認收款後可獲得 ' + earn + ' 點積分（每 1 點可折抵 ' + money(rules.pointValue) + '）。' : '';
       $('cart-submit').disabled = blocked;
       show('form');
     };
@@ -168,7 +180,9 @@
       code.appendChild(el('strong', '', order.code));
       card.appendChild(code);
       card.appendChild(orderLines(order.items));
+      if (order.discount) card.appendChild(el('p', '', '積分折抵 −' + money(order.discount) + '（使用 ' + order.pointsUsed + ' 點）'));
       card.appendChild(el('p', '', order.shipName + (order.shipFee ? '　運費 ' + money(order.shipFee) : '　免運')));
+      if (order.willEarn) card.appendChild(el('p', '', '確認收款後會獲得 ' + order.willEarn + ' 點積分。'));
       card.appendChild(el('p', 'bk-done-title h-serif', '應付 ' + money(order.total)));
       card.appendChild(bankLine());
       card.appendChild(el('p', '', '匯款後請在下面回報帳號末五碼。之後也可以在本頁下方「查詢訂單」用訂單編號與手機回報或查看進度。'));
@@ -193,11 +207,17 @@
         shipMethod: method, shipTo: $('cart-shipto').value,
         name: $('cart-name').value, phone: $('cart-phone').value, email: $('cart-email').value,
         line: $('cart-line').value, note: $('cart-note').value,
+        marketing: $('cart-marketing').checked,
+        pointsUse: form.pointsUse || 0, pointsCode: pointsCode,
       };
       var button = $('cart-submit');
       button.disabled = true;
       button.textContent = '送出中…';
       post('/api/orders', body).then(function (order) {
+        if (window.sscTrack) window.sscTrack('purchase', {
+          transaction_id: order.code, value: order.total, currency: 'TWD', shipping: order.shipFee,
+          items: order.items.map(function (it) { return { item_id: String(it.product_id), item_name: it.name, price: it.price, quantity: it.qty }; }),
+        });
         write({});
         done(order, body.phone);
       }).catch(function (err) {
@@ -214,6 +234,9 @@
         data.products.forEach(function (p) { products[p.id] = p; });
         shipping = data.shipping;
         maxQty = data.maxQtyPerItem || 10;
+        rules = data.points || rules;
+        $('cart-points').hidden = !rules.earnPer;
+        $('cart-points-hint').textContent = '買過的客人可以用積分折抵，每 1 點折 ' + money(rules.pointValue) + '。先在上面填好手機，再輸入任何一張過往訂單的編號來查詢。';
         var row = $('cart-ship');
         if (!row.children.length) {
           Object.keys(shipping).forEach(function (key) {
@@ -230,7 +253,35 @@
         $('cart-loading').textContent = '暫時無法載入購物車，請稍後再試或以官方 LINE 聯絡我們。';
       });
     };
-    load(false);
+    load(false).then(function () {
+      if (window.sscTrack && count()) window.sscTrack('begin_checkout', { currency: 'TWD' });
+    });
+
+    $('cart-points-go').addEventListener('click', function () {
+      var error = $('cart-points-error');
+      error.hidden = true;
+      var code = $('cart-points-code').value.trim();
+      post('/api/points/balance', { phone: $('cart-phone').value, code: code }).then(function (res) {
+        have = res.points;
+        pointsCode = code;
+        $('cart-points-check').hidden = true;
+        $('cart-points-use').hidden = false;
+        $('cart-points-n').max = have;
+        $('cart-points-n').value = have;
+        $('cart-points-have').textContent = '點（你有 ' + have + ' 點）';
+        render();
+      }).catch(function (err) { error.textContent = err.message; error.hidden = false; });
+    });
+    $('cart-points-n').addEventListener('input', render);
+    // Points belong to a phone number: changing it means proving it again.
+    $('cart-phone').addEventListener('input', function () {
+      if (have == null) return;
+      have = null;
+      pointsCode = '';
+      $('cart-points-check').hidden = false;
+      $('cart-points-use').hidden = true;
+      render();
+    });
   }
 
   // ---- Order look-up ----
@@ -252,6 +303,7 @@
         card.appendChild(orderLines(o.items));
         card.appendChild(el('p', '', o.shipName + (o.shipTo ? '　' + o.shipTo : '') + '　合計 ' + money(o.total)));
         if (o.tracking) card.appendChild(el('p', '', '寄件編號：' + o.tracking));
+        card.appendChild(el('p', '', '你目前有 ' + o.points + ' 點積分。'));
         if (o.status === 'pending') { card.appendChild(bankLine()); card.appendChild(payForm(o.code, phone)); }
         out.appendChild(card);
         out.hidden = false;
