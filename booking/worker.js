@@ -24,9 +24,14 @@
 //   POST /api/orders/payment         report transfer's last five digits
 //   POST /api/orders/lookup          { code, phone } -> the customer's own order
 //   POST /api/points/balance         { code, phone } -> points the customer can spend
+//   POST /api/promos/check           { code, subtotal } -> what the code takes off
+// Back office sign-in and owner-only pages:
+//   POST /api/admin/login { username, password } -> { token }; GET /api/admin/me; POST /api/admin/logout
+//   /api/admin/staff, /api/admin/promos, /api/admin/audit, /api/admin/backup, PUT /api/admin/password
 
 // ---- Settings the studio is likely to change -------------------------------
 export const CONFIG = {
+  addresses: { tn: '台南市北區長榮路四段40號', kh: '高雄市中華五路939巷24號' },
   slotMinutes: 90,      // length of one bookable slot
   capacity: 4,          // people per slot, per studio (classes and visits share it)
   minDaysAhead: 1,      // earliest bookable day: tomorrow
@@ -54,6 +59,7 @@ export const SHOP = {
     kh: { name: '高雄工作室自取', fee: 0 },
   },
   maxQtyPerItem: 10,
+  maxUnpaidOrders: 3,   // per phone number
   // Loyalty points: one point for every `earnPer` NT$ of goods (shipping excluded),
   // given when the studio marks the order as paid. Each point is worth `pointValue` NT$
   // off a later order. Set earnPer to 0 to switch points off.
@@ -135,31 +141,186 @@ async function getSetting(env, key) {
   return row ? row.value : '';
 }
 
-/** Tells the studio's notifier (a Google Apps Script web app) about a change. */
-function notify(env, ctx, event, booking) {
-  if (!env.NOTIFY_URL || !booking) return;
-  const send = getSetting(env, 'notify_emails').then((emails) => {
-    const payload = {
-      event, // 'booked' | 'payment' | 'status'
-      booking: { ...booking, studioName: CONFIG.studios[booking.studio].name, typeName: CONFIG.types[booking.type] },
-      slotMinutes: CONFIG.slotMinutes,
-      emails: emails ? emails.split(',') : [], // recipients chosen on the admin page
-    };
-    return fetch(env.NOTIFY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-  }).catch((err) => console.error('notify failed', err));
-  // Let the reply to the customer go out without waiting for the notifier.
-  if (ctx && ctx.waitUntil) ctx.waitUntil(send);
+/** Shop-wide choices the owner makes under 設定. */
+async function shopSettings(env) {
+  const rows = await env.DB.prepare("SELECT key, value FROM settings WHERE key IN ('bank_info', 'free_ship_over', 'customer_emails')").all();
+  const saved = Object.fromEntries(rows.results.map((r) => [r.key, r.value]));
+  return {
+    bankInfo: saved.bank_info || '',                       // shown to customers who owe a transfer
+    freeShipOver: Math.max(Number(saved.free_ship_over) || 0, 0), // goods total that earns free shipping; 0 = never
+    customerEmails: saved.customer_emails !== '0',         // email customers about their orders and bookings
+  };
 }
 
-/** Tells the same notifier about a shop order. */
-function notifyOrder(env, ctx, event, order) {
-  if (!env.NOTIFY_URL || !order) return;
-  const send = getSetting(env, 'notify_emails').then((emails) => {
-    const payload = { event, order: { ...order, shipName: SHOP.shipping[order.ship_method].name }, emails: emails ? emails.split(',') : [] };
+const money = (n) => 'NT$' + Number(n).toLocaleString('en-US');
+
+/** The email a customer gets about their own booking, or null when this change isn't worth one. */
+function bookingMail(event, b, shop, site) {
+  if (!b.email) return null;
+  const when = b.date + ' ' + b.time;
+  const where = CONFIG.studios[b.studio].name + '（' + CONFIG.addresses[b.studio] + '）';
+  const what = CONFIG.types[b.type] + '・' + b.people + ' 位';
+  const foot = ['', '預約編號：' + b.code, '需要改期或取消，請用官方 LINE 聯絡我們。', '', '奇怪貓工作室 Studio Strange Cat', site];
+  if (event === 'booked' && b.status === 'pending') {
+    return { to: b.email, subject: '【奇怪貓工作室】已收到你的預約 ' + when, body: [b.name + ' 你好，', '', '我們已為你保留名額：', when, where, what, '',
+      '請在三天內完成匯款，並到網站回報帳號末五碼，確認後才算預約成功。', shop.bankInfo ? '匯款資料：' + shop.bankInfo : '匯款資料請用官方 LINE 向我們索取。', ...foot].join('\n') };
+  }
+  if ((event === 'booked' || event === 'status') && b.status === 'confirmed') {
+    return { to: b.email, subject: '【奇怪貓工作室】預約已確認 ' + when, body: [b.name + ' 你好，', '', '你的預約已確認，到時見！', when, where, what, ...foot].join('\n') };
+  }
+  if (event === 'status' && b.status === 'cancelled') {
+    return { to: b.email, subject: '【奇怪貓工作室】預約已取消 ' + when, body: [b.name + ' 你好，', '', '以下預約已取消：', when, where, what, ...foot].join('\n') };
+  }
+  return null;
+}
+
+/** The same, for a shop order. */
+function orderMail(event, o, shop, site) {
+  if (!o.email) return null;
+  const lines = (o.items || []).map((it) => '・' + it.name + (it.options ? '（' + it.options + '）' : '') + ' × ' + it.qty + '　' + money(it.price * it.qty));
+  const sums = [
+    o.promo_discount ? '優惠碼 ' + o.promo_code + '　−' + money(o.promo_discount) : '',
+    o.discount ? '積分折抵　−' + money(o.discount) : '',
+    SHOP.shipping[o.ship_method].name + (o.ship_to ? '：' + o.ship_to : '') + '　運費 ' + (o.ship_fee ? money(o.ship_fee) : '免運'),
+    '合計 ' + money(o.total),
+  ].filter(String);
+  const foot = ['', '訂單編號：' + o.code, '查詢訂單：' + site + 'cart.html#lookup', '', '奇怪貓工作室 Studio Strange Cat'];
+  const mail = (subject, intro) => ({ to: o.email, subject: '【奇怪貓工作室】' + subject, body: [o.name + ' 你好，', '', ...intro, '', ...lines, ...sums, ...foot].join('\n') });
+  if (event === 'order') {
+    return mail('已收到你的訂單 ' + o.code, ['謝謝你的訂購！請匯款 ' + money(o.total) + '，再到「查詢訂單」回報帳號末五碼，我們確認後就會出貨。',
+      shop.bankInfo ? '匯款資料：' + shop.bankInfo : '匯款資料請用官方 LINE 向我們索取。']);
+  }
+  if (event !== 'order_status') return null;
+  if (o.status === 'paid') return mail('已確認收款 ' + o.code, ['我們已收到你的款項，正在準備出貨。' + (o.points_earned ? '這筆訂單為你累積了 ' + o.points_earned + ' 點積分。' : '')]);
+  if (o.status === 'shipped') {
+    const pickup = !SHOP.shipping[o.ship_method].ask;
+    return mail((pickup ? '可以取貨了 ' : '已出貨 ') + o.code, [pickup ? '你的訂單已準備好，歡迎在營業時間到工作室取貨。' : '你的訂單已寄出。' + (o.tracking ? '寄件編號：' + o.tracking : '')]);
+  }
+  if (o.status === 'cancelled') return mail('訂單已取消 ' + o.code, ['以下訂單已取消。如已匯款，我們會與你聯絡退款。']);
+  return null;
+}
+
+/** Posts to the studio's notifier (a Google Apps Script web app): it emails the studio, and the customer when `customer` is set. */
+function send(env, ctx, build) {
+  if (!env.NOTIFY_URL) return;
+  const work = Promise.all([getSetting(env, 'notify_emails'), shopSettings(env)]).then(([emails, shop]) => {
+    const site = env.SITE_URL || '';
+    const payload = build(shop, site);
+    payload.emails = emails ? emails.split(',') : []; // studio recipients chosen on the admin page
+    if (!shop.customerEmails || !payload.customer) delete payload.customer;
     return fetch(env.NOTIFY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   }).catch((err) => console.error('notify failed', err));
-  if (ctx && ctx.waitUntil) ctx.waitUntil(send);
+  // Let the reply go out without waiting for the notifier.
+  if (ctx && ctx.waitUntil) ctx.waitUntil(work);
+  return work;
 }
+
+function notify(env, ctx, event, booking) {
+  if (!booking) return;
+  return send(env, ctx, (shop, site) => ({
+    event, // 'booked' | 'payment' | 'status'
+    booking: { ...booking, studioName: CONFIG.studios[booking.studio].name, typeName: CONFIG.types[booking.type] },
+    slotMinutes: CONFIG.slotMinutes,
+    customer: bookingMail(event, booking, shop, site),
+  }));
+}
+
+function notifyOrder(env, ctx, event, order) {
+  if (!order) return;
+  return send(env, ctx, (shop, site) => ({
+    event, // 'order' | 'order_payment' | 'order_status'
+    order: { ...order, shipName: SHOP.shipping[order.ship_method].name },
+    customer: orderMail(event, order, shop, site),
+  }));
+}
+
+// ---- Protection against abuse ----
+/**
+ * True when this visitor has done `name` more than `max` times in the current window.
+ * Counted per IP address; requests without one (local tests) are never limited.
+ */
+async function limited(env, request, name, max, seconds) {
+  const ip = request.headers.get('CF-Connecting-IP');
+  if (!ip) return false;
+  const win = Math.floor(Date.now() / 1000 / seconds);
+  const row = await env.DB.prepare(
+    'INSERT INTO rate_limits (key, win, n) VALUES (?, ?, 1) ON CONFLICT(key, win) DO UPDATE SET n = n + 1 RETURNING n'
+  ).bind(name + ':' + ip, win).first();
+  // Old windows are swept out now and then rather than on every request.
+  if (Math.random() < 0.02) await env.DB.prepare('DELETE FROM rate_limits WHERE win < ?').bind(Math.floor(Date.now() / 1000 / 86400) - 1).run();
+  return row.n > max;
+}
+const TOO_MANY = [{ error: '操作太頻繁了，請稍後再試，或以官方 LINE 聯絡我們' }, 429];
+
+// ---- Staff accounts ----
+const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+const unhex = (text) => new Uint8Array(text.match(/../g).map((h) => parseInt(h, 16)));
+async function sha256(text) {
+  return hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
+}
+/** Passwords are never stored: only a salted, deliberately slow hash of them. */
+async function hashPassword(password, salt) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  return hex(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: unhex(salt), iterations: 100000 }, key, 256));
+}
+function same(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+const SESSION_HOURS = 12;
+const MASTER = { id: 0, name: '主帳號', username: 'admin', role: 'owner' };
+
+/** Who is asking: the master password, a signed-in member of staff, or nobody. */
+async function identify(request, env) {
+  const token = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!token) return null;
+  if (env.ADMIN_TOKEN && same(token, env.ADMIN_TOKEN)) return MASTER;
+  const row = await env.DB.prepare(
+    `SELECT s.staff_id, st.name, st.username, st.role, st.active FROM sessions s LEFT JOIN staff st ON st.id = s.staff_id
+     WHERE s.token_hash = ? AND s.expires_at > ?`
+  ).bind(await sha256(token), new Date().toISOString()).first();
+  if (!row) return null;
+  if (row.staff_id === 0) return MASTER;
+  return row.active ? { id: row.staff_id, name: row.name, username: row.username, role: row.role } : null;
+}
+
+async function login(request, env) {
+  if (await limited(env, request, 'login', 10, 900)) return TOO_MANY;
+  const body = await request.json().catch(() => ({}));
+  const username = clean(body.username, 30).toLowerCase();
+  const password = typeof body.password === 'string' ? body.password : '';
+  let who = null;
+  if (!username || username === 'admin') {
+    if (env.ADMIN_TOKEN && same(password, env.ADMIN_TOKEN)) who = MASTER;
+  } else {
+    const row = await env.DB.prepare('SELECT * FROM staff WHERE username = ? AND active = 1').bind(username).first();
+    if (row && same(await hashPassword(password, row.salt), row.hash)) who = { id: row.id, name: row.name, username: row.username, role: row.role };
+  }
+  if (!who) return [{ error: '帳號或密碼不正確' }, 401];
+  const token = hex(crypto.getRandomValues(new Uint8Array(32)));
+  const now = Date.now();
+  await env.DB.prepare('DELETE FROM sessions WHERE expires_at < ?').bind(new Date(now).toISOString()).run();
+  await env.DB.prepare('INSERT INTO sessions (token_hash, staff_id, expires_at) VALUES (?, ?, ?)')
+    .bind(await sha256(token), who.id, new Date(now + SESSION_HOURS * 3600000).toISOString()).run();
+  await env.DB.prepare('INSERT INTO audit (staff_id, staff_name, action, detail, created_at) VALUES (?, ?, ?, ?, ?)').bind(who.id, who.name, '登入', '', new Date(now).toISOString()).run();
+  return [{ token, name: who.name, username: who.username, role: who.role }, 200];
+}
+
+// What each change is called in the activity log. Photo uploads are left out (the product save that follows is logged).
+const AUDIT = [
+  [/^PATCH \/api\/admin\/bookings\/\d+$/, '更改預約狀態'], [/^POST \/api\/admin\/closures$/, '新增休息日'], [/^DELETE \/api\/admin\/closures$/, '移除休息日'],
+  [/^POST \/api\/admin\/products$/, '新增貨品'], [/^PUT \/api\/admin\/products\/\d+$/, '修改貨品'], [/^DELETE \/api\/admin\/products\/\d+$/, '刪除貨品'],
+  [/^POST \/api\/admin\/categories$/, '新增分類'], [/^PUT \/api\/admin\/categories\/\d+$/, '修改分類'], [/^DELETE \/api\/admin\/categories\/\d+$/, '刪除分類'],
+  [/^PATCH \/api\/admin\/orders\/\d+$/, '更新訂單'], [/^POST \/api\/admin\/customers$/, '新增客人'], [/^PUT \/api\/admin\/customers\/\+?\d+$/, '修改客人資料'],
+  [/^POST \/api\/admin\/customers\/\+?\d+\/points$/, '調整積分'], [/^PUT \/api\/admin\/settings$/, '更改設定'],
+  [/^POST \/api\/admin\/staff$/, '新增帳號'], [/^PUT \/api\/admin\/staff\/\d+$/, '修改帳號'], [/^DELETE \/api\/admin\/staff\/\d+$/, '刪除帳號'],
+  [/^PUT \/api\/admin\/password$/, '更改自己的密碼'], [/^POST \/api\/admin\/promos$/, '新增優惠碼'], [/^PUT \/api\/admin\/promos\/\d+$/, '修改優惠碼'],
+  [/^DELETE \/api\/admin\/promos\/\d+$/, '刪除優惠碼'], [/^GET \/api\/admin\/backup$/, '下載備份'],
+];
+// Only the owner may touch these: accounts, settings, money figures, backups, promotions, the log itself.
+const OWNER_ONLY = /^\/api\/admin\/(staff|settings|report|backup|audit|promos)(\/|$)/;
 
 /** Keeps one record per customer, keyed by phone. Newer details replace older ones; blanks never erase. */
 async function rememberCustomer(env, { name, phone, email = '', line = '', marketing = false }) {
@@ -177,14 +338,30 @@ async function rememberCustomer(env, { name, phone, email = '', line = '', marke
 
 /** The loyalty rules in force: what the studio saved, or the starting values above. */
 async function pointRules(env) {
-  const rows = await env.DB.prepare("SELECT key, value FROM settings WHERE key IN ('points_earn_per', 'points_value', 'points_class')").all();
+  const rows = await env.DB.prepare("SELECT key, value FROM settings WHERE key IN ('points_earn_per', 'points_value', 'points_class', 'points_expire_months')").all();
   const saved = Object.fromEntries(rows.results.map((r) => [r.key, Number(r.value)]));
   const pick = (key, fallback) => (Number.isInteger(saved[key]) && saved[key] >= 0 ? saved[key] : fallback);
   return {
     earnPer: pick('points_earn_per', SHOP.points.earnPer),
     pointValue: Math.max(pick('points_value', SHOP.points.pointValue), 1),
     classPoints: pick('points_class', SHOP.points.classPoints),
+    expireMonths: pick('points_expire_months', 0), // unused for this many months = gone; 0 = never
   };
+}
+
+/**
+ * Clears the points of anyone whose last points activity (earning or spending) is older
+ * than the expiry period. Run whenever balances are about to be shown or spent.
+ */
+async function sweepExpired(env) {
+  const { expireMonths } = await pointRules(env);
+  if (!expireMonths) return;
+  const cutoff = new Date();
+  cutoff.setUTCMonth(cutoff.getUTCMonth() - expireMonths);
+  await env.DB.prepare(
+    `INSERT INTO points (phone, delta, reason, order_id, created_at)
+     SELECT phone, -SUM(delta), ?1, NULL, ?2 FROM points GROUP BY phone HAVING SUM(delta) > 0 AND MAX(created_at) < ?3`
+  ).bind('積分到期（超過 ' + expireMonths + ' 個月沒有累積或使用）', new Date().toISOString(), cutoff.toISOString()).run();
 }
 
 async function pointsBalance(env, phone) {
@@ -208,6 +385,7 @@ async function checkPoints(body, env) {
   const phone = clean(body.phone, 20).replace(/[^\d+]/g, '');
   const code = clean(body.code, 12).toUpperCase();
   if (!await ownsOrder(env, phone, code)) return [{ error: '找不到這個編號，請確認訂單或預約編號與手機' }, 404];
+  await sweepExpired(env);
   return [{ points: await pointsBalance(env, phone), pointValue: (await pointRules(env)).pointValue }, 200];
 }
 
@@ -283,6 +461,8 @@ async function createBooking(body, env, ctx) {
   const people = Number(body.people);
   const name = clean(body.name, 40);
   const phone = clean(body.phone, 20).replace(/[^\d+]/g, '');
+  const email = clean(body.email, 80);
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return [{ error: 'Email 格式不正確' }, 400];
   if (!CONFIG.studios[studio]) return [{ error: '請選擇工作室' }, 400];
   if (!CONFIG.types[type]) return [{ error: '請選擇預約項目' }, 400];
   if (!Number.isInteger(people) || people < 1 || people > CONFIG.maxPeoplePerBooking) return [{ error: '人數不正確' }, 400];
@@ -301,21 +481,21 @@ async function createBooking(body, env, ctx) {
   // The capacity check lives inside the INSERT itself, so two people sending
   // at the same moment can never both take the last place in a slot.
   const result = await env.DB.prepare(
-    `INSERT INTO bookings (code, studio, date, time, type, people, name, phone, line_id, note, status, created_at)
-     SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
+    `INSERT INTO bookings (code, studio, date, time, type, people, name, phone, line_id, note, status, created_at, email)
+     SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?15
      WHERE (SELECT COALESCE(SUM(people), 0) FROM bookings WHERE studio = ?2 AND date = ?3 AND time = ?4 AND status != 'cancelled') + ?6 <= ?13
        AND NOT EXISTS (SELECT 1 FROM bookings WHERE date = ?3 AND status != 'cancelled' AND instr(?14, ',' || studio || ',') > 0)`
-  ).bind(code, studio, body.date, body.time, type, people, name, phone, clean(body.line, 40), clean(body.note, 300), status, new Date().toISOString(), CONFIG.capacity, ',' + blockers(studio).join(',') + ',').run();
+  ).bind(code, studio, body.date, body.time, type, people, name, phone, clean(body.line, 40), clean(body.note, 300), status, new Date().toISOString(), CONFIG.capacity, ',' + blockers(studio).join(',') + ',', email).run();
   if (!result.meta.changes) {
     const elsewhere = blockers(studio).length && await env.DB.prepare(
       "SELECT 1 FROM bookings WHERE date = ? AND status != 'cancelled' AND instr(?, ',' || studio || ',') > 0"
     ).bind(body.date, ',' + blockers(studio).join(',') + ',').first();
     return [{ error: elsewhere ? '這一天' + closedForOtherStudio(studio) + '，請改選其他日期' : '這個時段剛剛額滿了，請改選其他時段' }, 409];
   }
-  await rememberCustomer(env, { name, phone, line: clean(body.line, 40) });
-  notify(env, ctx, 'booked', { code, studio, date: body.date, time: body.time, type, people, name, phone, line_id: clean(body.line, 40), note: clean(body.note, 300), status });
+  await rememberCustomer(env, { name, phone, email, line: clean(body.line, 40) });
+  notify(env, ctx, 'booked', { code, studio, date: body.date, time: body.time, type, people, name, phone, email, line_id: clean(body.line, 40), note: clean(body.note, 300), status });
 
-  return [{ code, studio, studioName: CONFIG.studios[studio].name, date: body.date, time: body.time, type, typeName: CONFIG.types[type], people, status, slotMinutes: CONFIG.slotMinutes }, 201];
+  return [{ code, studio, studioName: CONFIG.studios[studio].name, date: body.date, time: body.time, type, typeName: CONFIG.types[type], people, status, slotMinutes: CONFIG.slotMinutes, bankInfo: (await shopSettings(env)).bankInfo }, 201];
 }
 
 async function reportPayment(body, env, ctx) {
@@ -332,17 +512,96 @@ async function reportPayment(body, env, ctx) {
 }
 
 /** Turns a database row into what the pages use. */
+function parseOptions(text) {
+  try { const v = JSON.parse(text || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+}
+const idList = (text) => (text || '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0);
+
 function productOut(row, origin) {
+  const image = row.image_id ? origin + '/api/images/' + row.image_id : row.image_url || '';
+  const galleryIds = idList(row.gallery);
+  // A sale price only counts when it really is lower than the usual one.
+  const onSale = row.sale_price !== null && row.sale_price !== undefined && row.price !== null && row.sale_price < row.price;
   return {
     id: row.id, name: row.name, stone: row.stone, cat: row.cat, supply: row.supply, note: row.note || '',
-    price: row.price, priceFrom: Boolean(row.price_from), stock: row.stock,
+    description: row.description || '',
+    price: row.price, salePrice: onSale ? row.sale_price : null, priceNow: onSale ? row.sale_price : row.price,
+    priceFrom: Boolean(row.price_from), stock: row.stock,
+    options: parseOptions(row.options), // e.g. [{ name: '戒圍', values: ['10', '11', '12'] }]
+    galleryIds, images: (image ? [image] : []).concat(galleryIds.map((id) => origin + '/api/images/' + id)),
     // Counted stock that has run out reads as sold out without anyone changing the status.
     status: row.status === 'active' && row.stock === 0 ? 'soldout' : row.status,
     sort: row.sort, link: row.link || '',
     // Only ready-made pieces with a fixed price go in the cart; the rest are arranged with the studio.
     buyable: row.status === 'active' && row.stock !== 0 && row.supply === 'stock' && row.price !== null && !row.price_from && !row.link,
-    image: row.image_id ? origin + '/api/images/' + row.image_id : row.image_url || '',
+    image,
   };
+}
+
+/** The extra product details that are saved after the main fields; returns [values] or [null, problem]. */
+function productExtras(body, price) {
+  const sale = body.salePrice === null || body.salePrice === undefined || body.salePrice === '' ? null : Number(body.salePrice);
+  if (sale !== null && (!Number.isInteger(sale) || sale < 0)) return [null, '特價不正確'];
+  if (sale !== null && (price === null || sale >= price)) return [null, '特價要比原價低'];
+  const gallery = (Array.isArray(body.galleryIds) ? body.galleryIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 5);
+  const options = [];
+  for (const o of Array.isArray(body.options) ? body.options.slice(0, 3) : []) {
+    const name = clean(o && o.name, 12);
+    const values = [...new Set((Array.isArray(o && o.values) ? o.values : []).map((v) => clean(String(v), 20)).filter(Boolean))].slice(0, 30);
+    if (!name && !values.length) continue;
+    if (!name || !values.length) return [null, '每個規格選項都要有名稱和至少一個選擇'];
+    if (/[:：、|]/.test(name + values.join(''))) return [null, '規格選項不能含有 : 、 | 這些符號'];
+    options.push({ name, values });
+  }
+  return [[clean(body.description, 2000), sale, gallery.join(','), JSON.stringify(options)]];
+}
+
+async function saveExtras(env, id, extras, before) {
+  const row = await env.DB.prepare('UPDATE products SET description = ?, sale_price = ?, gallery = ?, options = ? WHERE id = ? RETURNING *').bind(...extras, id).first();
+  // Extra photos that were removed are no longer used by anything.
+  const keep = idList(extras[2]);
+  for (const old of idList(before)) if (!keep.includes(old)) await env.DB.prepare('DELETE FROM images WHERE id = ?').bind(old).run();
+  return row;
+}
+
+// ---- Promo codes ----
+function promoIn(body) {
+  const code = clean(body.code, 20).toUpperCase();
+  if (!/^[A-Z0-9]{3,20}$/.test(code)) return [null, '優惠碼請用 3–20 個英文字母或數字'];
+  if (!['percent', 'amount'].includes(body.kind)) return [null, '請選擇折扣方式'];
+  const value = Number(body.value);
+  if (!Number.isInteger(value) || value < 1 || (body.kind === 'percent' && value > 90)) return [null, body.kind === 'percent' ? '折扣請填 1–90（代表減幾 %）' : '折扣金額請填 1 或以上的整數'];
+  const whole = (v) => (v === '' || v === null || v === undefined ? null : Number(v));
+  const minSpend = whole(body.minSpend) || 0;
+  const maxUses = whole(body.maxUses);
+  if (!Number.isInteger(minSpend) || minSpend < 0) return [null, '最低消費不正確'];
+  if (maxUses !== null && (!Number.isInteger(maxUses) || maxUses < 1)) return [null, '可用次數請填 1 或以上，或留空代表不限'];
+  const starts = body.starts || '';
+  const ends = body.ends || '';
+  if ((starts && !isDate(starts)) || (ends && !isDate(ends)) || (starts && ends && ends < starts)) return [null, '有效日期不正確'];
+  return [[code, body.kind, value, minSpend, maxUses, starts, ends, body.active === false ? 0 : 1]];
+}
+
+/** Why a code can't be used on goods worth `subtotal` today, or null when it can. */
+function promoProblem(promo, subtotal) {
+  const today = taipeiToday();
+  if (!promo || !promo.active) return '這個優惠碼無效';
+  if (promo.starts && today < promo.starts) return '這個優惠碼還沒開始';
+  if (promo.ends && today > promo.ends) return '這個優惠碼已經過期';
+  if (promo.max_uses !== null && promo.used >= promo.max_uses) return '這個優惠碼已經用完';
+  if (subtotal < promo.min_spend) return '這個優惠碼要消費滿 ' + money(promo.min_spend) + ' 才能使用';
+  return null;
+}
+function promoDiscount(promo, subtotal) {
+  return promo.kind === 'percent' ? Math.floor(subtotal * promo.value / 100) : Math.min(promo.value, subtotal);
+}
+
+async function checkPromo(body, env) {
+  const subtotal = Number(body.subtotal) || 0;
+  const promo = await env.DB.prepare('SELECT * FROM promos WHERE code = ?').bind(clean(body.code, 20).toUpperCase()).first();
+  const problem = promoProblem(promo, subtotal);
+  if (problem) return [{ error: problem }, 404];
+  return [{ code: promo.code, kind: promo.kind, value: promo.value, minSpend: promo.min_spend, discount: promoDiscount(promo, subtotal) }, 200];
 }
 
 /** Checks a product sent from the admin page; returns [fields] or [null, problem]. */
@@ -388,7 +647,7 @@ async function getImage(id, env, headers) {
 }
 
 async function orderWithItems(env, order) {
-  const items = await env.DB.prepare('SELECT product_id, name, price, qty FROM order_items WHERE order_id = ? ORDER BY rowid').bind(order.id).all();
+  const items = await env.DB.prepare('SELECT product_id, name, price, qty, options FROM order_items WHERE order_id = ? ORDER BY rowid').bind(order.id).all();
   return { ...order, items: items.results };
 }
 
@@ -409,23 +668,40 @@ async function createOrder(body, env, ctx) {
   if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return [{ error: 'Email 格式不正確' }, 400];
   if (!method) return [{ error: '請選擇取貨方式' }, 400];
   if (SHOP.shipping[method].ask && !shipTo) return [{ error: '請填寫' + SHOP.shipping[method].ask }, 400];
+  // Unpaid orders hold stock, so one phone number can only have a few waiting at a time.
+  const waiting = await env.DB.prepare("SELECT COUNT(*) AS n FROM orders WHERE phone = ? AND status = 'pending'").bind(phone).first();
+  if (waiting.n >= SHOP.maxUnpaidOrders) return [{ error: '你有 ' + waiting.n + ' 筆訂單尚未付款，請先完成匯款或用官方 LINE 聯絡我們取消' }, 429];
 
   // Merge repeated lines, then read prices from the database: the browser's numbers are never trusted.
+  // The same piece in the same options is one line; a different ring size is its own line.
   const wanted = new Map();
   for (const it of Array.isArray(body.items) ? body.items.slice(0, 30) : []) {
     const id = Number(it && it.id);
     const qty = Number(it && it.qty);
     if (!Number.isInteger(id) || !Number.isInteger(qty) || qty < 1) return [{ error: '購物車內容不正確' }, 400];
-    wanted.set(id, (wanted.get(id) || 0) + qty);
+    const chosen = it.options && typeof it.options === 'object' ? it.options : {};
+    const key = id + '|' + JSON.stringify(Object.keys(chosen).sort().map((k) => [k, String(chosen[k])]));
+    const line = wanted.get(key) || { id, qty: 0, chosen };
+    line.qty += qty;
+    wanted.set(key, line);
   }
   if (!wanted.size) return [{ error: '購物車是空的' }, 400];
   const lines = [];
-  for (const [id, qty] of wanted) {
+  const perProduct = {};
+  for (const { id, qty, chosen } of wanted.values()) {
     const row = await env.DB.prepare('SELECT * FROM products WHERE id = ?').bind(id).first();
     const p = row && productOut(row, '');
     if (!p || !p.buyable) return [{ error: (row ? '「' + row.name + '」' : '其中一件貨品') + '目前無法線上訂購，請從購物車移除', productId: id }, 409];
-    if (qty > SHOP.maxQtyPerItem) return [{ error: '「' + p.name + '」每張訂單最多 ' + SHOP.maxQtyPerItem + ' 件', productId: id }, 400];
-    lines.push({ product_id: id, name: p.name, price: p.price, qty });
+    perProduct[id] = (perProduct[id] || 0) + qty;
+    if (perProduct[id] > SHOP.maxQtyPerItem) return [{ error: '「' + p.name + '」每張訂單最多 ' + SHOP.maxQtyPerItem + ' 件', productId: id }, 400];
+    // Every option the product has must be answered with one of its own choices.
+    const picked = [];
+    for (const o of p.options) {
+      const value = String(chosen[o.name] === undefined ? '' : chosen[o.name]);
+      if (!o.values.includes(value)) return [{ error: '請為「' + p.name + '」選擇' + o.name, productId: id }, 400];
+      picked.push(o.name + ':' + value);
+    }
+    lines.push({ product_id: id, name: p.name, price: p.priceNow, qty, options: picked.join('、') });
   }
 
   // Take the stock one item at a time; each UPDATE only succeeds while enough is left,
@@ -443,17 +719,40 @@ async function createOrder(body, env, ctx) {
   }
 
   const subtotal = lines.reduce((sum, l) => sum + l.price * l.qty, 0);
-  const shipFee = SHOP.shipping[method].fee;
   const rules = await pointRules(env);
+  const shop = await shopSettings(env);
+  // From here on, anything that stops the order must first hand back what was already taken.
+  let promo = null;
+  const undo = async () => {
+    await putBackStock(env, taken);
+    if (promo) await env.DB.prepare('UPDATE promos SET used = MAX(used - 1, 0) WHERE id = ?').bind(promo.id).run();
+  };
+
+  // Promo code: checked against today's rules, then claimed in one step so a limited code can't be over-used.
+  let promoOff = 0;
+  const promoCode = clean(body.promo, 20).toUpperCase();
+  if (promoCode) {
+    const found = await env.DB.prepare('SELECT * FROM promos WHERE code = ?').bind(promoCode).first();
+    const problem = promoProblem(found, subtotal);
+    if (problem) { await undo(); return [{ error: problem }, 400]; }
+    const claimed = await env.DB.prepare('UPDATE promos SET used = used + 1 WHERE id = ? AND (max_uses IS NULL OR used < max_uses)').bind(found.id).run();
+    if (!claimed.meta.changes) { await undo(); return [{ error: '這個優惠碼剛剛用完了' }, 409]; }
+    promo = found;
+    promoOff = promoDiscount(found, subtotal);
+  }
+  const goods = subtotal - promoOff; // what the customer pays for the goods before points
+  const freeShip = shop.freeShipOver > 0 && goods >= shop.freeShipOver;
+  const shipFee = freeShip ? 0 : SHOP.shipping[method].fee;
 
   // Spending points: never more than the goods are worth, and only with a past order's code as proof.
   let pointsUsed = 0;
   const wantPoints = Number(body.pointsUse) || 0;
   if (wantPoints) {
-    const fail = async (error, status) => { await putBackStock(env, taken); return [{ error }, status]; };
+    const fail = async (error, status) => { await undo(); return [{ error }, status]; };
     if (!Number.isInteger(wantPoints) || wantPoints < 0) return fail('積分數量不正確', 400);
+    await sweepExpired(env);
     if (!await ownsOrder(env, phone, clean(body.pointsCode, 12).toUpperCase())) return fail('積分驗證失敗：請確認過往訂單編號與手機', 400);
-    pointsUsed = Math.min(wantPoints, Math.floor(subtotal / rules.pointValue));
+    pointsUsed = Math.min(wantPoints, Math.floor(goods / rules.pointValue));
     // The balance check lives inside the INSERT, so the same points can't be spent twice at once.
     const spent = await env.DB.prepare(
       `INSERT INTO points (phone, delta, reason, order_id, created_at)
@@ -465,27 +764,28 @@ async function createOrder(body, env, ctx) {
 
   const order = {
     code: newCode(), name, phone, email, line_id: clean(body.line, 40), ship_method: method, ship_to: shipTo,
-    note: clean(body.note, 300), subtotal, discount, points_used: pointsUsed, ship_fee: shipFee, total: subtotal - discount + shipFee,
+    note: clean(body.note, 300), subtotal, promo_code: promo ? promo.code : '', promo_discount: promoOff, discount, points_used: pointsUsed,
+    ship_fee: shipFee, total: goods - discount + shipFee,
     status: 'pending', created_at: new Date().toISOString(),
   };
   let saved;
   try {
     saved = await env.DB.prepare(
-      `INSERT INTO orders (code, name, phone, email, line_id, ship_method, ship_to, note, subtotal, discount, points_used, ship_fee, total, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
-    ).bind(order.code, name, phone, email, order.line_id, method, shipTo, order.note, subtotal, discount, pointsUsed, shipFee, order.total, 'pending', order.created_at).first();
+      `INSERT INTO orders (code, name, phone, email, line_id, ship_method, ship_to, note, subtotal, discount, points_used, ship_fee, total, status, created_at, promo_code, promo_discount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
+    ).bind(order.code, name, phone, email, order.line_id, method, shipTo, order.note, subtotal, discount, pointsUsed, shipFee, order.total, 'pending', order.created_at, order.promo_code, promoOff).first();
     for (const l of lines) {
-      await env.DB.prepare('INSERT INTO order_items (order_id, product_id, name, price, qty) VALUES (?, ?, ?, ?, ?)').bind(saved.id, l.product_id, l.name, l.price, l.qty).run();
+      await env.DB.prepare('INSERT INTO order_items (order_id, product_id, name, price, qty, options) VALUES (?, ?, ?, ?, ?, ?)').bind(saved.id, l.product_id, l.name, l.price, l.qty, l.options).run();
     }
   } catch (err) {
-    await putBackStock(env, taken);
+    await undo();
     await addPoints(env, phone, pointsUsed, '訂單未成立，退回積分');
     throw err;
   }
   await rememberCustomer(env, { name, phone, email, line: order.line_id, marketing: Boolean(body.marketing) });
   notifyOrder(env, ctx, 'order', { ...order, items: lines });
-  const willEarn = rules.earnPer ? Math.floor((subtotal - discount) / rules.earnPer) : 0;
-  return [{ code: order.code, items: lines, subtotal, discount, pointsUsed, shipFee, total: order.total, shipName: SHOP.shipping[method].name, status: 'pending', willEarn }, 201];
+  const willEarn = rules.earnPer ? Math.floor((goods - discount) / rules.earnPer) : 0;
+  return [{ code: order.code, items: lines, subtotal, promoCode: order.promo_code, promoDiscount: promoOff, discount, pointsUsed, shipFee, total: order.total, shipName: SHOP.shipping[method].name, status: 'pending', willEarn, bankInfo: shop.bankInfo }, 201];
 }
 
 async function reportOrderPayment(body, env, ctx) {
@@ -507,9 +807,10 @@ async function lookupOrder(body, env) {
   const phone = clean(body.phone, 20).replace(/[^\d+]/g, '');
   const row = code && phone && await env.DB.prepare('SELECT * FROM orders WHERE code = ? AND phone = ?').bind(code, phone).first();
   if (!row) return [{ error: '找不到這筆訂單，請確認訂單編號與電話' }, 404];
+  await sweepExpired(env);
   const o = await orderWithItems(env, row);
-  return [{ code: o.code, status: o.status, items: o.items, subtotal: o.subtotal, discount: o.discount, shipFee: o.ship_fee, total: o.total,
-    points: await pointsBalance(env, phone),
+  return [{ code: o.code, status: o.status, items: o.items, subtotal: o.subtotal, promoCode: o.promo_code || '', promoDiscount: o.promo_discount || 0, discount: o.discount, shipFee: o.ship_fee, total: o.total,
+    points: await pointsBalance(env, phone), bankInfo: (await shopSettings(env)).bankInfo,
     shipName: SHOP.shipping[o.ship_method].name, shipTo: o.ship_to, tracking: o.tracking || '', paid: Boolean(o.pay_last5), date: taipeiToday(Date.parse(o.created_at)) }, 200];
 }
 
@@ -560,20 +861,120 @@ async function report(env) {
   return { totals, months: Object.values(months).sort((a, b) => (a.month < b.month ? 1 : -1)).slice(0, 12), top: top.results };
 }
 
-function isAdmin(request, env) {
-  const token = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
-  return Boolean(env.ADMIN_TOKEN) && token === env.ADMIN_TOKEN;
+async function admin(request, url, env, ctx) {
+  const path = url.pathname;
+  if (path === '/api/admin/login' && request.method === 'POST') return login(request, env);
+  const who = await identify(request, env);
+  if (!who) return [{ error: '未授權' }, 401];
+  if (OWNER_ONLY.test(path) && who.role !== 'owner') return [{ error: '這項功能只有店主帳號可以使用' }, 403];
+
+  // Every change is written to the activity log with who made it.
+  const label = (AUDIT.find(([pattern]) => pattern.test(request.method + ' ' + path)) || [])[1];
+  const sent = label && request.method !== 'GET' ? await request.clone().text().catch(() => '') : '';
+  const result = await adminRoutes(request, url, env, ctx, who);
+  if (label && result[1] < 400) {
+    let detail = path.replace('/api/admin/', '');
+    try {
+      const body = JSON.parse(sent || '{}');
+      for (const secret of ['password', 'current', 'next']) delete body[secret];
+      if (Object.keys(body).length) detail += ' ' + JSON.stringify(body);
+    } catch (e) { /* not JSON: the path alone will do */ }
+    await env.DB.prepare('INSERT INTO audit (staff_id, staff_name, action, detail, created_at) VALUES (?, ?, ?, ?, ?)')
+      .bind(who.id, who.name, label, detail.slice(0, 400), new Date().toISOString()).run();
+  }
+  return result;
 }
 
-async function admin(request, url, env, ctx) {
-  if (!isAdmin(request, env)) return [{ error: '未授權' }, 401];
+/** Checks the fields of a staff account; `needPassword` is false when editing without changing it. */
+function staffIn(body, needPassword) {
+  const name = clean(body.name, 30);
+  const username = clean(body.username, 30).toLowerCase();
+  if (!name) return [null, '請填寫姓名'];
+  if (!/^[a-z0-9_.-]{3,30}$/.test(username) || username === 'admin') return [null, '登入帳號請用 3–30 個英文小寫、數字或 . _ -（不可用 admin）'];
+  if (!['owner', 'staff'].includes(body.role)) return [null, '請選擇權限'];
+  const password = typeof body.password === 'string' ? body.password : '';
+  if ((needPassword || password) && password.length < 8) return [null, '密碼至少 8 個字元'];
+  return [{ name, username, role: body.role, password, active: body.active === false ? 0 : 1 }];
+}
+
+async function adminRoutes(request, url, env, ctx, who) {
   const path = url.pathname;
+
+  if (path === '/api/admin/me' && request.method === 'GET') return [{ name: who.name, username: who.username, role: who.role, master: who.id === 0 }, 200];
+  if (path === '/api/admin/logout' && request.method === 'POST') {
+    const token = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+    await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(await sha256(token)).run();
+    return [{ ok: true }, 200];
+  }
+  if (path === '/api/admin/password' && request.method === 'PUT') {
+    if (who.id === 0) return [{ error: '主帳號的密碼在 Cloudflare 後台更改（ADMIN_TOKEN）' }, 400];
+    const body = await request.json().catch(() => ({}));
+    const row = await env.DB.prepare('SELECT * FROM staff WHERE id = ?').bind(who.id).first();
+    if (!row || !same(await hashPassword(String(body.current || ''), row.salt), row.hash)) return [{ error: '目前的密碼不正確' }, 400];
+    if (typeof body.next !== 'string' || body.next.length < 8) return [{ error: '新密碼至少 8 個字元' }, 400];
+    const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
+    await env.DB.prepare('UPDATE staff SET salt = ?, hash = ? WHERE id = ?').bind(salt, await hashPassword(body.next, salt), who.id).run();
+    return [{ ok: true }, 200];
+  }
+
+  // Accounts (owner only).
+  const staffMatch = path.match(/^\/api\/admin\/staff(?:\/(\d+))?$/);
+  if (staffMatch && request.method === 'GET') {
+    const rows = await env.DB.prepare('SELECT id, username, name, role, active, created_at FROM staff ORDER BY id').all();
+    return [{ staff: rows.results }, 200];
+  }
+  if (staffMatch && !staffMatch[1] && request.method === 'POST') {
+    const [f, problem] = staffIn(await request.json().catch(() => ({})), true);
+    if (!f) return [{ error: problem }, 400];
+    if (await env.DB.prepare('SELECT 1 FROM staff WHERE username = ?').bind(f.username).first()) return [{ error: '這個登入帳號已經有人使用' }, 409];
+    const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
+    await env.DB.prepare('INSERT INTO staff (username, name, role, salt, hash, active, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)')
+      .bind(f.username, f.name, f.role, salt, await hashPassword(f.password, salt), new Date().toISOString()).run();
+    return [{ ok: true }, 201];
+  }
+  if (staffMatch && staffMatch[1] && request.method === 'PUT') {
+    const id = Number(staffMatch[1]);
+    const [f, problem] = staffIn(await request.json().catch(() => ({})), false);
+    if (!f) return [{ error: problem }, 400];
+    if (await env.DB.prepare('SELECT 1 FROM staff WHERE username = ? AND id != ?').bind(f.username, id).first()) return [{ error: '這個登入帳號已經有人使用' }, 409];
+    const r = await env.DB.prepare('UPDATE staff SET username = ?, name = ?, role = ?, active = ? WHERE id = ?').bind(f.username, f.name, f.role, f.active, id).run();
+    if (!r.meta.changes) return [{ error: '找不到這個帳號' }, 404];
+    if (f.password) {
+      const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
+      await env.DB.prepare('UPDATE staff SET salt = ?, hash = ? WHERE id = ?').bind(salt, await hashPassword(f.password, salt), id).run();
+    }
+    // A changed password or a switched-off account signs that person out everywhere.
+    if (f.password || !f.active) await env.DB.prepare('DELETE FROM sessions WHERE staff_id = ?').bind(id).run();
+    return [{ ok: true }, 200];
+  }
+  if (staffMatch && staffMatch[1] && request.method === 'DELETE') {
+    const id = Number(staffMatch[1]);
+    if (id === who.id) return [{ error: '不能刪除自己正在使用的帳號' }, 400];
+    const r = await env.DB.prepare('DELETE FROM staff WHERE id = ?').bind(id).run();
+    if (!r.meta.changes) return [{ error: '找不到這個帳號' }, 404];
+    await env.DB.prepare('DELETE FROM sessions WHERE staff_id = ?').bind(id).run();
+    return [{ ok: true }, 200];
+  }
+
+  if (path === '/api/admin/audit' && request.method === 'GET') {
+    const rows = await env.DB.prepare('SELECT staff_name, action, detail, created_at FROM audit ORDER BY id DESC LIMIT 300').all();
+    return [{ audit: rows.results }, 200];
+  }
+
+  // Everything except photos (too big) and sign-in data, as one file the owner can keep.
+  if (path === '/api/admin/backup' && request.method === 'GET') {
+    const tables = {};
+    for (const t of ['bookings', 'closures', 'settings', 'categories', 'products', 'orders', 'order_items', 'customers', 'points', 'promos']) {
+      tables[t] = (await env.DB.prepare(`SELECT * FROM ${t}`).all()).results;
+    }
+    return [{ exported_at: new Date().toISOString(), note: '不包含貨品相片、後台帳號與登入紀錄', tables }, 200];
+  }
 
   if (path === '/api/admin/bookings' && request.method === 'GET') {
     const from = isDate(url.searchParams.get('from')) ? url.searchParams.get('from') : taipeiToday();
     const rows = await env.DB.prepare('SELECT * FROM bookings WHERE date >= ? ORDER BY date, time, studio, id').bind(from).all();
     const closed = await env.DB.prepare('SELECT * FROM closures WHERE date >= ? ORDER BY date, studio').bind(from).all();
-    return [{ bookings: rows.results, closures: closed.results, config: CONFIG, settings: { notify_emails: await getSetting(env, 'notify_emails'), points: await pointRules(env) } }, 200];
+    return [{ bookings: rows.results, closures: closed.results, config: CONFIG, settings: { notify_emails: await getSetting(env, 'notify_emails'), points: await pointRules(env), shop: await shopSettings(env) } }, 200];
   }
 
   const match = path.match(/^\/api\/admin\/bookings\/(\d+)$/);
@@ -653,16 +1054,18 @@ async function admin(request, url, env, ctx) {
     const body = await request.json().catch(() => ({}));
     const [fields, problem] = productIn(body, await listCategories(env));
     if (!fields) return [{ error: problem }, 400];
+    const [extras, extraProblem] = productExtras(body, fields[5]);
+    if (!extras) return [{ error: extraProblem }, 400];
     if (request.method === 'POST' && !productMatch[1]) {
       const saved = await env.DB.prepare(
         `INSERT INTO products (name, stone, cat, supply, note, price, price_from, stock, status, sort, link, image_id, image_url, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?) RETURNING *`
       ).bind(...fields, new Date().toISOString()).first();
-      return [{ product: productOut(saved, url.origin) }, 201];
+      return [{ product: productOut(await saveExtras(env, saved.id, extras, ''), url.origin) }, 201];
     }
     if (request.method === 'PUT' && productMatch[1]) {
       // A product keeps its current photo unless a new one was uploaded with this save.
-      const before = await env.DB.prepare('SELECT image_id FROM products WHERE id = ?').bind(Number(productMatch[1])).first();
+      const before = await env.DB.prepare('SELECT image_id, gallery FROM products WHERE id = ?').bind(Number(productMatch[1])).first();
       const saved = await env.DB.prepare(
         `UPDATE products SET name = ?, stone = ?, cat = ?, supply = ?, note = ?, price = ?, price_from = ?, stock = ?, status = ?, sort = ?, link = ?,
            image_id = COALESCE(?, image_id) WHERE id = ? RETURNING *`
@@ -670,19 +1073,40 @@ async function admin(request, url, env, ctx) {
       if (!saved) return [{ error: '找不到這件貨品' }, 404];
       // The photo it replaced is no longer used by anything.
       if (before && before.image_id && before.image_id !== saved.image_id) await env.DB.prepare('DELETE FROM images WHERE id = ?').bind(before.image_id).run();
-      return [{ product: productOut(saved, url.origin) }, 200];
+      return [{ product: productOut(await saveExtras(env, saved.id, extras, before.gallery), url.origin) }, 200];
     }
   }
   if (productMatch && productMatch[1] && request.method === 'DELETE') {
-    const gone = await env.DB.prepare('DELETE FROM products WHERE id = ? RETURNING image_id').bind(Number(productMatch[1])).first();
+    const gone = await env.DB.prepare('DELETE FROM products WHERE id = ? RETURNING image_id, gallery').bind(Number(productMatch[1])).first();
     if (!gone) return [{ error: '找不到這件貨品' }, 404];
-    if (gone.image_id) await env.DB.prepare('DELETE FROM images WHERE id = ?').bind(gone.image_id).run();
+    for (const id of [gone.image_id, ...idList(gone.gallery)]) if (id) await env.DB.prepare('DELETE FROM images WHERE id = ?').bind(id).run();
     return [{ ok: true }, 200];
+  }
+
+  const promoMatch = path.match(/^\/api\/admin\/promos(?:\/(\d+))?$/);
+  if (promoMatch && request.method === 'GET') {
+    return [{ promos: (await env.DB.prepare('SELECT * FROM promos ORDER BY id DESC').all()).results }, 200];
+  }
+  if (promoMatch && (request.method === 'POST' || request.method === 'PUT')) {
+    const [f, problem] = promoIn(await request.json().catch(() => ({})));
+    if (!f) return [{ error: problem }, 400];
+    const id = promoMatch[1] ? Number(promoMatch[1]) : 0;
+    if (await env.DB.prepare('SELECT 1 FROM promos WHERE code = ? AND id != ?').bind(f[0], id).first()) return [{ error: '已經有相同的優惠碼' }, 409];
+    if (request.method === 'POST' && !id) {
+      await env.DB.prepare('INSERT INTO promos (code, kind, value, min_spend, max_uses, starts, ends, active, used, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)').bind(...f, new Date().toISOString()).run();
+      return [{ ok: true }, 201];
+    }
+    const r = await env.DB.prepare('UPDATE promos SET code = ?, kind = ?, value = ?, min_spend = ?, max_uses = ?, starts = ?, ends = ?, active = ? WHERE id = ?').bind(...f, id).run();
+    return r.meta.changes ? [{ ok: true }, 200] : [{ error: '找不到這個優惠碼' }, 404];
+  }
+  if (promoMatch && promoMatch[1] && request.method === 'DELETE') {
+    const r = await env.DB.prepare('DELETE FROM promos WHERE id = ?').bind(Number(promoMatch[1])).run();
+    return r.meta.changes ? [{ ok: true }, 200] : [{ error: '找不到這個優惠碼' }, 404];
   }
 
   if (path === '/api/admin/orders' && request.method === 'GET') {
     const rows = await env.DB.prepare('SELECT * FROM orders ORDER BY id DESC LIMIT 300').all();
-    const items = await env.DB.prepare('SELECT order_id, product_id, name, price, qty FROM order_items WHERE order_id IN (SELECT id FROM orders ORDER BY id DESC LIMIT 300)').all();
+    const items = await env.DB.prepare('SELECT order_id, product_id, name, price, qty, options FROM order_items WHERE order_id IN (SELECT id FROM orders ORDER BY id DESC LIMIT 300)').all();
     const byOrder = {};
     for (const it of items.results) (byOrder[it.order_id] = byOrder[it.order_id] || []).push(it);
     return [{ orders: rows.results.map((o) => ({ ...o, items: byOrder[o.id] || [] })), shipping: SHOP.shipping }, 200];
@@ -708,12 +1132,13 @@ async function admin(request, url, env, ctx) {
       await addPoints(env, current.phone, current.points_used, '訂單 ' + current.code + ' 取消，退回積分', id);
       await addPoints(env, current.phone, -current.points_earned, '訂單 ' + current.code + ' 取消，收回積分', id);
       await env.DB.prepare('UPDATE orders SET points_earned = 0 WHERE id = ?').bind(id).run();
+      if (current.promo_code) await env.DB.prepare('UPDATE promos SET used = MAX(used - 1, 0) WHERE code = ?').bind(current.promo_code).run();
     }
     // Points are earned once, the first time the studio confirms the money arrived.
     const nowPaid = ['paid', 'shipped', 'done'].includes(status) && !['paid', 'shipped', 'done'].includes(current.status);
     const rules = await pointRules(env);
     if (nowPaid && !current.points_earned && rules.earnPer) {
-      const earned = Math.floor((current.subtotal - current.discount) / rules.earnPer);
+      const earned = Math.floor((current.subtotal - (current.promo_discount || 0) - current.discount) / rules.earnPer);
       if (earned) {
         await addPoints(env, current.phone, earned, '訂單 ' + current.code + ' 消費回饋', id);
         await env.DB.prepare('UPDATE orders SET points_earned = ? WHERE id = ?').bind(earned, id).run();
@@ -725,6 +1150,7 @@ async function admin(request, url, env, ctx) {
   }
 
   if (path === '/api/admin/customers' && request.method === 'GET') {
+    await sweepExpired(env);
     const rows = await env.DB.prepare(
       `SELECT c.*,
          (SELECT COUNT(*) FROM orders o WHERE o.phone = c.phone AND o.status != 'cancelled') AS orders,
@@ -756,6 +1182,7 @@ async function admin(request, url, env, ctx) {
   if (customerMatch && request.method === 'GET') {
     const customer = await env.DB.prepare('SELECT * FROM customers WHERE phone = ?').bind(customerMatch[1]).first();
     if (!customer) return [{ error: '找不到這位客人' }, 404];
+    await sweepExpired(env);
     const orders = await env.DB.prepare('SELECT * FROM orders WHERE phone = ? ORDER BY id DESC').bind(customer.phone).all();
     const bookings = await env.DB.prepare('SELECT * FROM bookings WHERE phone = ? ORDER BY date DESC, time DESC').bind(customer.phone).all();
     const ledger = await env.DB.prepare('SELECT delta, reason, created_at FROM points WHERE phone = ? ORDER BY id DESC LIMIT 100').bind(customer.phone).all();
@@ -785,6 +1212,7 @@ async function admin(request, url, env, ctx) {
   }
 
   if (path === '/api/admin/points' && request.method === 'GET') {
+    await sweepExpired(env);
     const totals = await env.DB.prepare(
       `SELECT COALESCE(SUM(CASE WHEN delta > 0 THEN delta ELSE 0 END), 0) AS issued,
          COALESCE(SUM(CASE WHEN delta < 0 THEN -delta ELSE 0 END), 0) AS used,
@@ -814,10 +1242,22 @@ async function admin(request, url, env, ctx) {
       if (!whole(p.earnPer, 100000)) return [{ error: '「每消費多少元得 1 點」請填 0 或以上的整數（0 = 不送點）' }, 400];
       if (!whole(p.pointValue, 1000) || Number(p.pointValue) < 1) return [{ error: '「1 點折多少元」請填 1 或以上的整數' }, 400];
       if (!whole(p.classPoints, 100000)) return [{ error: '「體驗課送點」請填 0 或以上的整數' }, 400];
-      for (const [key, value] of [['points_earn_per', p.earnPer], ['points_value', p.pointValue], ['points_class', p.classPoints]]) {
+      const expire = p.expireMonths === undefined || p.expireMonths === '' ? 0 : p.expireMonths;
+      if (!whole(expire, 120)) return [{ error: '「幾個月沒用就到期」請填 0–120 的整數（0 = 永不到期）' }, 400];
+      for (const [key, value] of [['points_earn_per', p.earnPer], ['points_value', p.pointValue], ['points_class', p.classPoints], ['points_expire_months', expire]]) {
         await env.DB.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').bind(key, String(Number(value))).run();
       }
       return [{ ok: true, points: await pointRules(env) }, 200];
+    }
+    // Shop-wide choices: bank details, free shipping, whether customers get emails.
+    if (body.shop) {
+      const sh = body.shop;
+      const over = sh.freeShipOver === '' || sh.freeShipOver === undefined ? 0 : Number(sh.freeShipOver);
+      if (!Number.isInteger(over) || over < 0 || over > 9999999) return [{ error: '免運門檻請填 0 或以上的整數（0 = 不設免運）' }, 400];
+      for (const [key, value] of [['bank_info', clean(sh.bankInfo, 200)], ['free_ship_over', String(over)], ['customer_emails', sh.customerEmails === false ? '0' : '1']]) {
+        await env.DB.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').bind(key, value).run();
+      }
+      return [{ ok: true, shop: await shopSettings(env) }, 200];
     }
     const emails = clean(body.notify_emails, 300).split(/[\s,;，；]+/).filter(Boolean);
     if (emails.length > 5) return [{ error: '最多 5 個收件人' }, 400];
@@ -851,19 +1291,23 @@ export default {
       if (url.pathname === '/api/slots' && request.method === 'GET') {
         result = await getSlots(url, env);
       } else if (url.pathname === '/api/bookings' && request.method === 'POST') {
-        result = await createBooking(await request.json().catch(() => ({})), env, ctx);
+        result = await limited(env, request, 'book', 6, 3600) ? TOO_MANY : await createBooking(await request.json().catch(() => ({})), env, ctx);
       } else if (url.pathname === '/api/bookings/payment' && request.method === 'POST') {
-        result = await reportPayment(await request.json().catch(() => ({})), env, ctx);
+        result = await limited(env, request, 'check', 30, 3600) ? TOO_MANY : await reportPayment(await request.json().catch(() => ({})), env, ctx);
       } else if (url.pathname === '/api/products' && request.method === 'GET') {
-        return json({ products: await listProducts(env, url.origin, false), categories: await listCategories(env), shipping: SHOP.shipping, maxQtyPerItem: SHOP.maxQtyPerItem, points: await pointRules(env) }, 200, { ...headers, 'Cache-Control': 'public, max-age=60' });
+        const shop = await shopSettings(env);
+        return json({ products: await listProducts(env, url.origin, false), categories: await listCategories(env), shipping: SHOP.shipping, maxQtyPerItem: SHOP.maxQtyPerItem,
+          points: await pointRules(env), freeShipOver: shop.freeShipOver, bankInfo: shop.bankInfo }, 200, { ...headers, 'Cache-Control': 'public, max-age=60' });
       } else if (url.pathname === '/api/orders' && request.method === 'POST') {
-        result = await createOrder(await request.json().catch(() => ({})), env, ctx);
+        result = await limited(env, request, 'order', 6, 3600) ? TOO_MANY : await createOrder(await request.json().catch(() => ({})), env, ctx);
       } else if (url.pathname === '/api/orders/payment' && request.method === 'POST') {
-        result = await reportOrderPayment(await request.json().catch(() => ({})), env, ctx);
+        result = await limited(env, request, 'check', 30, 3600) ? TOO_MANY : await reportOrderPayment(await request.json().catch(() => ({})), env, ctx);
       } else if (url.pathname === '/api/points/balance' && request.method === 'POST') {
-        result = await checkPoints(await request.json().catch(() => ({})), env);
+        result = await limited(env, request, 'check', 30, 3600) ? TOO_MANY : await checkPoints(await request.json().catch(() => ({})), env);
+      } else if (url.pathname === '/api/promos/check' && request.method === 'POST') {
+        result = await limited(env, request, 'check', 30, 3600) ? TOO_MANY : await checkPromo(await request.json().catch(() => ({})), env);
       } else if (url.pathname === '/api/orders/lookup' && request.method === 'POST') {
-        result = await lookupOrder(await request.json().catch(() => ({})), env);
+        result = await limited(env, request, 'check', 30, 3600) ? TOO_MANY : await lookupOrder(await request.json().catch(() => ({})), env);
       } else if (/^\/api\/images\/\d+$/.test(url.pathname) && request.method === 'GET') {
         return await getImage(url.pathname.split('/').pop(), env, headers);
       } else if (url.pathname.startsWith('/api/admin/')) {

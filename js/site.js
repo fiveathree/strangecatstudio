@@ -221,7 +221,8 @@
       var soldout = p.status === 'soldout';
       card.className = 'p-card' + (soldout ? ' is-soldout' : '');
       a.className = 'p-link';
-      a.href = p.link || 'visit.html';
+      // Every piece has its own page unless the studio pointed it somewhere else.
+      a.href = p.link || 'item.html?id=' + p.id;
       if (/^https:/.test(a.getAttribute('href'))) { a.target = '_blank'; a.rel = 'noopener'; }
       card.setAttribute('data-stone', p.stone);
       card.setAttribute('data-cat', p.cat);
@@ -242,16 +243,25 @@
       a.appendChild(meta);
       a.appendChild(span('p-name', p.name));
       if (p.note) a.appendChild(span('p-note', p.note));
-      a.appendChild(span('p-price', p.price == null ? '價錢請洽詢' : 'NT$' + Number(p.price).toLocaleString('en-US') + (p.priceFrom ? ' 起' : '')));
+      var cost = span('p-price', p.priceNow == null ? '價錢請洽詢' : 'NT$' + Number(p.priceNow).toLocaleString('en-US') + (p.priceFrom ? ' 起' : ''));
+      if (p.salePrice != null) {
+        var was = document.createElement('s');
+        was.className = 'item-was';
+        was.textContent = 'NT$' + Number(p.price).toLocaleString('en-US');
+        cost.appendChild(was);
+      }
+      a.appendChild(cost);
       card.appendChild(a);
       if (p.buyable && window.sscCart) {
         var buy = document.createElement('button');
         buy.type = 'button';
         buy.className = 'p-buy';
-        buy.textContent = '加入購物車';
+        // A piece with options (ring size, colour) is chosen on its own page.
+        buy.textContent = p.options.length ? '選擇規格' : '加入購物車';
         buy.addEventListener('click', function () {
-          window.sscCart.add(p.id, p.stock == null ? null : p.stock, p);
-          buy.textContent = '已加入 ✓';
+          if (p.options.length) { window.location.href = 'item.html?id=' + p.id; return; }
+          var added = window.sscCart.add(p.id, p.stock == null ? null : p.stock, p, '');
+          buy.textContent = added ? '已加入 ✓' : '已是最後一件';
           setTimeout(function () { buy.textContent = '加入購物車'; }, 1400);
         });
         card.appendChild(buy);
@@ -295,9 +305,9 @@
         grid.textContent = '';
         data.products.forEach(function (p) { grid.appendChild(productCard(p)); });
         // Tell search engines what is for sale (name, photo, price, in stock or not).
-        var listed = data.products.filter(function (p) { return p.price != null; }).map(function (p, i) {
+        var listed = data.products.filter(function (p) { return p.priceNow != null; }).map(function (p, i) {
           var item = { '@type': 'Product', name: p.name, description: p.note || p.name, brand: { '@type': 'Brand', name: '奇怪貓工作室' },
-            offers: { '@type': 'Offer', priceCurrency: 'TWD', price: p.price, url: window.location.href.split('?')[0],
+            offers: { '@type': 'Offer', priceCurrency: 'TWD', price: p.priceNow, url: new URL(p.link || 'item.html?id=' + p.id, window.location.href).href,
               availability: 'https://schema.org/' + (p.status === 'soldout' ? 'OutOfStock' : p.supply === 'made' ? 'MadeToOrder' : 'InStock') } };
           if (p.image) item.image = new URL(p.image, window.location.href).href;
           return { '@type': 'ListItem', position: i + 1, item: item };

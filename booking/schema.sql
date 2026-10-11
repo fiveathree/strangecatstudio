@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS bookings (
   -- cancelled = no longer holds a place
   status      TEXT NOT NULL DEFAULT 'pending',
   pay_last5   TEXT,
-  created_at  TEXT NOT NULL
+  created_at  TEXT NOT NULL,
+  email       TEXT                           -- optional; confirmations are sent here
 );
 
 CREATE INDEX IF NOT EXISTS bookings_slot ON bookings (studio, date, time);
@@ -54,6 +55,10 @@ CREATE TABLE IF NOT EXISTS products (
   link        TEXT,                       -- where the card goes; empty = booking page
   image_id    INTEGER,                    -- photo uploaded from the admin page
   image_url   TEXT,                       -- or a file already in the site's assets
+  description TEXT,                       -- longer text for the product's own page
+  sale_price  INTEGER,                    -- lower price while on offer; NULL = not on offer
+  gallery     TEXT,                       -- extra photos: comma-separated image ids
+  options     TEXT,                       -- JSON: [{"name":"戒圍","values":["10","11"]}]
   created_at  TEXT NOT NULL
 );
 
@@ -80,6 +85,8 @@ CREATE TABLE IF NOT EXISTS orders (
   discount     INTEGER NOT NULL DEFAULT 0, -- NT$ taken off by spending points
   points_used  INTEGER NOT NULL DEFAULT 0,
   points_earned INTEGER NOT NULL DEFAULT 0, -- given when the order was marked paid
+  promo_code   TEXT,
+  promo_discount INTEGER NOT NULL DEFAULT 0, -- NT$ taken off by the promo code
   ship_fee     INTEGER NOT NULL,
   total        INTEGER NOT NULL,
   -- pending | reported | paid | shipped | done | cancelled
@@ -96,7 +103,8 @@ CREATE TABLE IF NOT EXISTS order_items (
   product_id  INTEGER NOT NULL,
   name        TEXT NOT NULL,
   price       INTEGER NOT NULL,
-  qty         INTEGER NOT NULL
+  qty         INTEGER NOT NULL,
+  options     TEXT                        -- chosen options, e.g. 戒圍:12、顏色:藍
 );
 CREATE INDEX IF NOT EXISTS order_items_order ON order_items (order_id);
 
@@ -140,3 +148,52 @@ INSERT OR IGNORE INTO categories (kind, slug, name, sort) VALUES
   ('stone', 'crystal', '水晶鍊', 40), ('stone', 'glassware', '玻璃飾品', 50),
   ('cat', 'ring', '戒指', 10), ('cat', 'necklace', '項鍊', 20), ('cat', 'earrings', '耳環', 30),
   ('cat', 'bracelet', '手鍊', 40), ('cat', 'other', '其他', 50);
+
+-- Back-office accounts. The master password (the ADMIN_TOKEN secret) always works as well.
+CREATE TABLE IF NOT EXISTS staff (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  username    TEXT NOT NULL UNIQUE,
+  name        TEXT NOT NULL,
+  role        TEXT NOT NULL,               -- owner | staff
+  salt        TEXT NOT NULL,
+  hash        TEXT NOT NULL,               -- PBKDF2 of the password; the password itself is never stored
+  active      INTEGER NOT NULL DEFAULT 1,
+  created_at  TEXT NOT NULL
+);
+-- Who is signed in. Only a hash of the session token is kept. staff_id 0 = the master password.
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash  TEXT PRIMARY KEY,
+  staff_id    INTEGER NOT NULL,
+  expires_at  TEXT NOT NULL
+);
+-- Every change made in the back office, and by whom.
+CREATE TABLE IF NOT EXISTS audit (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  staff_id    INTEGER NOT NULL,
+  staff_name  TEXT NOT NULL,
+  action      TEXT NOT NULL,
+  detail      TEXT,
+  created_at  TEXT NOT NULL
+);
+-- Counts requests per visitor so nobody can flood orders, bookings or password guesses.
+CREATE TABLE IF NOT EXISTS rate_limits (
+  key  TEXT NOT NULL,
+  win  INTEGER NOT NULL,
+  n    INTEGER NOT NULL,
+  PRIMARY KEY (key, win)
+);
+
+-- Promo codes.
+CREATE TABLE IF NOT EXISTS promos (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  code        TEXT NOT NULL UNIQUE,
+  kind        TEXT NOT NULL,               -- percent | amount
+  value       INTEGER NOT NULL,            -- % off, or NT$ off
+  min_spend   INTEGER NOT NULL DEFAULT 0,
+  max_uses    INTEGER,                     -- NULL = unlimited
+  used        INTEGER NOT NULL DEFAULT 0,
+  starts      TEXT,                        -- YYYY-MM-DD or empty
+  ends        TEXT,
+  active      INTEGER NOT NULL DEFAULT 1,
+  created_at  TEXT NOT NULL
+);

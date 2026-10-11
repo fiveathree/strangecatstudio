@@ -5,6 +5,8 @@ compatibility_date = "2026-01-01"
 [vars]
 # Sites allowed to call the API from a browser. Add your own domain when you have one.
 ALLOWED_ORIGINS = "https://fiveathree.github.io"
+# Where the public site lives, with a trailing slash. Used for links in emails to customers.
+SITE_URL = "https://fiveathree.github.io/strangecatstudio/"
 
 [[d1_databases]]
 binding = "DB"

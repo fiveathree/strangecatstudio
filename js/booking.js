@@ -137,6 +137,7 @@
       field('姓名', 'bk-name', 'text', 'name', true),
       field('電話', 'bk-phone', 'tel', 'tel', true),
       field('LINE ID（選填）', 'bk-line', 'text', 'off', false),
+      field('Email（選填，寄確認信給你）', 'bk-email', 'email', 'email', false),
       el('div', { 'class': 'bk-input bk-input-wide' }, [
         el('label', { 'for': 'bk-note', text: '備註（選填）' }),
         el('textarea', { id: 'bk-note', rows: '3', maxlength: '300', placeholder: '例如：想做的體驗課項目、送禮對象、想了解的產品' }),
@@ -168,7 +169,7 @@
     button.textContent = '送出中…';
     request('POST', '/api/bookings', {
       studio: state.studio, date: state.date, time: state.time, type: state.type, people: state.people,
-      name: value('bk-name'), phone: phone, line: value('bk-line'), note: value('bk-note'),
+      name: value('bk-name'), phone: phone, line: value('bk-line'), email: value('bk-email'), note: value('bk-note'),
     }).then(function (booking) {
       if (window.sscTrack) window.sscTrack('generate_lead', { booking_type: booking.type, studio: booking.studio, people: booking.people });
       done(booking, phone);
@@ -192,7 +193,7 @@
       el('p', { 'class': 'bk-code' }, [el('span', { text: '預約編號 ' }), el('strong', { text: booking.code })]),
     ];
     if (booking.type === 'class') {
-      parts.push(el('p', { text: window.SSC_BANK_INFO ? '請匯款至：' + window.SSC_BANK_INFO : '請加入官方 LINE 取得匯款資料。' }));
+      parts.push(el('p', { text: (booking.bankInfo || window.SSC_BANK_INFO) ? '請匯款至：' + (booking.bankInfo || window.SSC_BANK_INFO) : '請加入官方 LINE 取得匯款資料。' }));
       parts.push(el('p', { text: '匯款後，在下方填寫匯款帳號末五碼，或直接以 LINE 告訴我們，名額才算確認。' }));
       var input = el('input', { id: 'bk-last5', type: 'text', inputmode: 'numeric', maxlength: '5', pattern: '\\d{5}', placeholder: '末五碼', 'aria-label': '匯款帳號末五碼' });
       var note = el('p', { 'class': 'bk-hint', role: 'status' });

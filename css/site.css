@@ -589,3 +589,31 @@ button.admin-tile:hover { border-color: var(--ink); }
   .admin-cat input { flex-basis: 100%; }
 }
 @media (prefers-reduced-motion: reduce) { .admin-side { transition: none; } }
+
+/* ---- Admin: accounts, promos, product extras ---- */
+.admin-who { padding: 0 12px 10px; font-size: 13px; color: var(--muted); }
+.admin-options { display: flex; flex-direction: column; gap: 8px; }
+.admin-option { display: grid; grid-template-columns: minmax(110px, 1fr) 3fr; gap: 8px; }
+.admin-gallery-item { display: inline-flex; flex-direction: column; align-items: center; }
+.admin-gallery-item img { width: 88px; height: 88px; }
+.admin-table td { white-space: normal; }
+.admin-table td.admin-actions { white-space: nowrap; }
+#au-list td:last-child { max-width: 460px; word-break: break-all; color: var(--muted); font-size: 13px; }
+[data-owner][hidden] { display: none; }
+
+/* ---- Product page ---- */
+.item { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 48px; margin-top: 16px; align-items: start; }
+.item-photos img#item-photo, .item-photos .ph { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+.item-photos .ph { display: flex; }
+.item-thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.item-thumb { padding: 0; border: 2px solid transparent; background: none; cursor: pointer; }
+.item-thumb[aria-pressed="true"] { border-color: var(--accent); }
+.item-thumb img { width: 72px; height: 72px; object-fit: cover; display: block; }
+.item-info { display: flex; flex-direction: column; gap: 14px; }
+.item-info h1 { font-size: 34px; margin: 0; }
+.item-price { margin: 0; font-size: 24px; color: var(--accent); }
+.item-was { margin-left: 10px; font-size: 0.75em; color: var(--muted); }
+.item-ask { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.item-ask:hover { color: var(--on-ink); }
+.item-desc { margin: 8px 0 0; padding-top: 20px; border-top: 1px solid var(--line); color: var(--soft); white-space: pre-line; }
+@media (max-width: 760px) { .item { grid-template-columns: 1fr; gap: 24px; } .item-info h1 { font-size: 28px; } }

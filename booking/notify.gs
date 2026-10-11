@@ -5,7 +5,8 @@
  * their transfer, or the studio changes a booking's status. This script then:
  *   1. emails the studio,
  *   2. keeps the studio's Google Calendar in step (adds, retitles, removes),
- *   3. optionally pushes a LINE message.
+ *   3. optionally pushes a LINE message,
+ *   4. emails the customer when the Worker supplies a message for them.
  *
  * Settings live in Project Settings → Script properties (all optional):
  *   STUDIO_EMAIL  where to send the emails when none are set on the admin page
@@ -38,6 +39,7 @@ function doPost(e) {
     summary,
     '電話：' + b.phone,
     b.line_id ? 'LINE：' + b.line_id : '',
+    b.email ? 'Email：' + b.email : '',
     b.note ? '備註：' + b.note : '',
     b.pay_last5 ? '匯款末五碼：' + b.pay_last5 : '',
     '預約編號：' + b.code,
@@ -53,6 +55,7 @@ function doPost(e) {
   attempt(errors, 'calendar', function () {
     syncCalendar(props.getProperty('CALENDAR_ID'), b, data.slotMinutes || 90, lines);
   });
+  mailCustomer(errors, data);
   attempt(errors, 'line', function () {
     pushLine(props.getProperty('LINE_TOKEN'), props.getProperty('LINE_TO'), lines.join('\n'));
   });
@@ -64,9 +67,11 @@ function orderNotice(props, data) {
   var o = data.order;
   var heading = { order: '新訂單', order_payment: '訂單已回報匯款末五碼', order_status: '訂單狀態更新' }[data.event] || '訂單通知';
   var lines = [heading + '（' + (ORDER_STATUS[o.status] || o.status) + '）', '訂單編號：' + o.code, o.name + '　' + o.phone]
-    .concat((o.items || []).map(function (it) { return '・' + it.name + ' × ' + it.qty + '　NT$' + it.price * it.qty; }))
+    .concat((o.items || []).map(function (it) { return '・' + it.name + (it.options ? '（' + it.options + '）' : '') + ' × ' + it.qty + '　NT$' + it.price * it.qty; }))
     .concat([
       o.shipName + (o.ship_to ? '：' + o.ship_to : ''),
+      o.promo_discount ? '優惠碼 ' + o.promo_code + '　−NT$' + o.promo_discount : '',
+      o.discount ? '積分折抵　−NT$' + o.discount : '',
       '運費 NT$' + o.ship_fee + '　合計 NT$' + o.total,
       o.pay_last5 ? '匯款末五碼：' + o.pay_last5 : '',
       o.tracking ? '寄件編號：' + o.tracking : '',
@@ -83,7 +88,19 @@ function orderNotice(props, data) {
   attempt(errors, 'line', function () {
     pushLine(props.getProperty('LINE_TOKEN'), props.getProperty('LINE_TO'), lines.join('\n'));
   });
+  mailCustomer(errors, data);
   return reply({ ok: errors.length === 0, errors: errors });
+}
+
+/**
+ * The Worker decides whether the customer should hear about this change and writes the
+ * message; this only sends it. Sent from the account that runs this script.
+ */
+function mailCustomer(errors, data) {
+  if (!data.customer || !data.customer.to) return;
+  attempt(errors, 'customer email', function () {
+    MailApp.sendEmail(data.customer.to, data.customer.subject, data.customer.body, { name: '奇怪貓工作室' });
+  });
 }
 
 /** One failing channel must not stop the others. */

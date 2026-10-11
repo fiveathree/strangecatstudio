@@ -14,7 +14,9 @@
 <img src="assets/logo.png" alt="" width="72" height="72">
 <div class="eyebrow">STUDIO ONLY</div>
 <h1 class="h-serif">工作室後台</h1>
-<label for="token">管理密碼</label>
+<label for="username">帳號</label>
+<input id="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="主帳號可留空">
+<label for="token">密碼</label>
 <input id="token" type="password" autocomplete="current-password" required>
 <button type="submit" class="bk-submit">登入</button>
 <p id="login-error" class="bk-error" role="alert" hidden></p>
@@ -30,18 +32,23 @@
 <button type="button" class="admin-nav" data-tab="closures" aria-pressed="false">休息日</button>
 <div class="admin-nav-group">銷售</div>
 <button type="button" class="admin-nav" data-tab="orders" aria-pressed="false">訂單<span class="admin-count" id="n-orders" hidden></span></button>
+<button type="button" class="admin-nav" data-tab="promos" data-owner aria-pressed="false">優惠碼</button>
 <div class="admin-nav-group">貨品</div>
 <button type="button" class="admin-nav" data-tab="products" aria-pressed="false">貨品列表</button>
 <button type="button" class="admin-nav" data-tab="categories" aria-pressed="false">分類管理</button>
 <div class="admin-nav-group">客人</div>
 <button type="button" class="admin-nav" data-tab="customers" aria-pressed="false">客人名單</button>
 <button type="button" class="admin-nav" data-tab="points" aria-pressed="false">積分管理</button>
-<div class="admin-nav-group">分析</div>
-<button type="button" class="admin-nav" data-tab="report" aria-pressed="false">報表</button>
+<div class="admin-nav-group" data-owner>分析</div>
+<button type="button" class="admin-nav" data-tab="report" data-owner aria-pressed="false">報表</button>
 <div class="admin-nav-group">系統</div>
-<button type="button" class="admin-nav" data-tab="settings" aria-pressed="false">設定</button>
+<button type="button" class="admin-nav" data-tab="settings" data-owner aria-pressed="false">商店設定</button>
+<button type="button" class="admin-nav" data-tab="staff" data-owner aria-pressed="false">帳號管理</button>
+<button type="button" class="admin-nav" data-tab="audit" data-owner aria-pressed="false">操作紀錄</button>
+<button type="button" class="admin-nav" data-tab="me" aria-pressed="false">我的帳號</button>
 </nav>
 <div class="admin-side-foot">
+<div class="admin-who" id="who"></div>
 <button type="button" class="admin-nav" id="reload">重新整理</button>
 <button type="button" class="admin-nav" id="logout">登出</button>
 </div>
@@ -64,6 +71,7 @@
 </section>
 
 <section id="tab-bookings" hidden>
+<div class="admin-bar"><button type="button" class="chip" id="b-export">匯出 CSV</button></div>
 <div id="list"></div>
 </section>
 
@@ -84,6 +92,7 @@
 <button type="button" class="chip" data-value="open" aria-pressed="true">處理中</button>
 <button type="button" class="chip" data-value="all" aria-pressed="false">全部</button>
 </div>
+<button type="button" class="chip" id="o-export">匯出 CSV</button>
 <span id="o-summary" style="color: var(--muted)"></span>
 </div>
 <div id="o-list"></div>
@@ -120,6 +129,7 @@
 <div class="bk-input"><label for="pt-earn">每消費多少元得 1 點</label><input id="pt-earn" type="number" inputmode="numeric" min="0" step="1" required><span class="bk-hint">只計商品金額，訂單確認收款時入點。填 0 即不送點。</span></div>
 <div class="bk-input"><label for="pt-value">1 點可折多少元</label><input id="pt-value" type="number" inputmode="numeric" min="1" step="1" required><span class="bk-hint">只能折商品金額，不能折運費。</span></div>
 <div class="bk-input"><label for="pt-class">體驗課確認後送幾點</label><input id="pt-class" type="number" inputmode="numeric" min="0" step="1" required><span class="bk-hint">每筆體驗課預約按「確認」時送一次。填 0 即不送。</span></div>
+<div class="bk-input"><label for="pt-expire">幾個月沒用就到期</label><input id="pt-expire" type="number" inputmode="numeric" min="0" max="120" step="1" required><span class="bk-hint">客人超過這段時間沒有累積或使用積分，積分全部歸零。填 0 即永不到期。</span></div>
 </div>
 <div class="admin-bar" style="margin: 0"><button type="submit" class="chip" aria-pressed="true">儲存規則</button><span id="pt-status" role="status" style="color: var(--muted)"></span></div>
 <p class="bk-hint" id="pt-rate" style="margin: 0"></p>
@@ -177,13 +187,21 @@
 <div class="bk-input"><label for="p-supply">供應方式</label><select id="p-supply"><option value="stock">現貨</option><option value="made">手工訂製</option></select></div>
 <div class="bk-input"><label for="p-status">狀態</label><select id="p-status"><option value="active">上架</option><option value="soldout">售完</option><option value="hidden">隱藏</option></select></div>
 <div class="bk-input"><label for="p-price">價錢（NT$）</label><input id="p-price" type="number" inputmode="numeric" min="0" step="1" placeholder="留空＝請洽詢"></div>
+<div class="bk-input"><label for="p-sale">特價（NT$）</label><input id="p-sale" type="number" inputmode="numeric" min="0" step="1" placeholder="留空＝沒有特價"></div>
 <div class="bk-input"><label for="p-stock">庫存</label><input id="p-stock" type="number" inputmode="numeric" min="0" step="1" placeholder="留空＝不計數量"></div>
 <div class="bk-input"><label for="p-sort">排序</label><input id="p-sort" type="number" inputmode="numeric" step="1" placeholder="數字小的排前面"></div>
 <label class="admin-check"><input id="p-from" type="checkbox"> 價錢後面加「起」</label>
 <div class="bk-input bk-input-wide"><label for="p-note">規格說明</label><input id="p-note" type="text" maxlength="120" placeholder="例如：圓形切割 6–7mm ・ 純銀"></div>
+<div class="bk-input bk-input-wide"><label for="p-desc">詳細介紹</label><textarea id="p-desc" rows="4" maxlength="2000" placeholder="顯示在貨品自己的頁面：材質、尺寸、保養方式、故事…"></textarea></div>
+<div class="bk-input bk-input-wide"><label>規格選項（最多 3 組）</label>
+<div id="p-options" class="admin-options"></div>
+<p class="bk-hint">例如名稱填「戒圍」，選擇填「10、11、12、13」。客人下單時每組都要選一個。各選擇共用同一個價錢與庫存。</p></div>
 <div class="bk-input bk-input-wide"><label for="p-link">連結</label><input id="p-link" type="text" maxlength="300" placeholder="留空＝帶客人到預約頁；可填 https:// 開頭的網址（例如賣貨便）"></div>
 <div class="bk-input bk-input-wide"><label for="p-photo">相片</label>
 <div class="admin-photo"><img id="p-preview" alt="" hidden><input id="p-photo" type="file" accept="image/*"></div>
+<label for="p-more" style="margin-top: 10px">更多相片（最多 5 張）</label>
+<div class="admin-photo" id="p-gallery"></div>
+<input id="p-more" type="file" accept="image/*" multiple>
 <p class="bk-hint">直接用手機拍或選相片就可以，會自動縮小後上傳。不選就保留原本的相片。</p></div>
 <p id="p-error" class="bk-error" role="alert" hidden></p>
 </div>
@@ -196,7 +214,73 @@
 <div id="p-list" class="admin-products"></div>
 </section>
 
+<section id="tab-promos" hidden>
+<form id="pr-form" class="admin-form">
+<h2 class="admin-h2" id="pr-title" style="margin: 0">新增優惠碼</h2>
+<div class="bk-form">
+<div class="bk-input"><label for="pr-code">優惠碼</label><input id="pr-code" type="text" maxlength="20" required placeholder="例如 OPEN10" style="text-transform: uppercase"></div>
+<div class="bk-input"><label for="pr-kind">折扣方式</label><select id="pr-kind"><option value="percent">打折（減 %）</option><option value="amount">折現（減 NT$）</option></select></div>
+<div class="bk-input"><label for="pr-value">折多少</label><input id="pr-value" type="number" inputmode="numeric" min="1" step="1" required placeholder="10 = 減 10% 或 NT$10"></div>
+<div class="bk-input"><label for="pr-min">最低消費（NT$）</label><input id="pr-min" type="number" inputmode="numeric" min="0" step="1" placeholder="留空＝不限"></div>
+<div class="bk-input"><label for="pr-max">可用次數</label><input id="pr-max" type="number" inputmode="numeric" min="1" step="1" placeholder="留空＝不限"></div>
+<div class="bk-input"><label for="pr-starts">開始日</label><input id="pr-starts" type="date"></div>
+<div class="bk-input"><label for="pr-ends">結束日</label><input id="pr-ends" type="date"></div>
+<label class="admin-check"><input id="pr-active" type="checkbox" checked> 啟用</label>
+</div>
+<div class="admin-bar" style="margin: 0"><button type="submit" class="chip" aria-pressed="true">儲存</button><button type="button" class="chip" id="pr-reset">清空</button><span id="pr-status" role="status" style="color: var(--muted)"></span></div>
+</form>
+<div class="admin-table"><table id="pr-list"></table></div>
+<p class="bk-hint">優惠碼只折商品金額，不折運費；可以與積分一起用（先扣優惠碼，再扣積分）。訂單取消時會把使用次數還回去。</p>
+</section>
+
+<section id="tab-staff" hidden>
+<form id="st-form" class="admin-form">
+<h2 class="admin-h2" id="st-title" style="margin: 0">新增帳號</h2>
+<div class="bk-form">
+<div class="bk-input"><label for="st-name">姓名</label><input id="st-name" type="text" maxlength="30" required></div>
+<div class="bk-input"><label for="st-username">登入帳號</label><input id="st-username" type="text" maxlength="30" required autocapitalize="none" spellcheck="false" placeholder="英文小寫或數字"></div>
+<div class="bk-input"><label for="st-role">權限</label><select id="st-role"><option value="staff">店員（預約、訂單、貨品、客人）</option><option value="owner">店主（全部功能）</option></select></div>
+<div class="bk-input"><label for="st-password">密碼</label><input id="st-password" type="password" autocomplete="new-password" minlength="8" placeholder="至少 8 個字元"></div>
+<label class="admin-check"><input id="st-active" type="checkbox" checked> 可以登入</label>
+</div>
+<div class="admin-bar" style="margin: 0"><button type="submit" class="chip" aria-pressed="true">儲存</button><button type="button" class="chip" id="st-reset">清空</button><span id="st-status" role="status" style="color: var(--muted)"></span></div>
+</form>
+<div class="admin-table"><table id="st-list"></table></div>
+<p class="bk-hint">店員看不到報表、商店設定、優惠碼、帳號管理與操作紀錄。主帳號（Cloudflare 上的管理密碼）永遠可以登入，用來在忘記密碼時救援。</p>
+</section>
+
+<section id="tab-audit" hidden>
+<div class="admin-table"><table id="au-list"></table></div>
+<p class="bk-hint">顯示最近 300 筆在後台做過的更改。</p>
+</section>
+
+<section id="tab-me" hidden>
+<p id="me-info" style="margin: 0 0 20px; color: var(--soft)"></p>
+<form id="me-form" class="admin-form" hidden>
+<h2 class="admin-h2" style="margin: 0">更改密碼</h2>
+<div class="bk-form">
+<div class="bk-input"><label for="me-current">目前的密碼</label><input id="me-current" type="password" autocomplete="current-password" required></div>
+<div class="bk-input"><label for="me-next">新密碼</label><input id="me-next" type="password" autocomplete="new-password" minlength="8" required placeholder="至少 8 個字元"></div>
+</div>
+<div class="admin-bar" style="margin: 0"><button type="submit" class="chip" aria-pressed="true">更改密碼</button><span id="me-status" role="status" style="color: var(--muted)"></span></div>
+</form>
+</section>
+
 <section id="tab-settings" hidden>
+<h2 class="admin-h2">商店</h2>
+<form id="shop-form" class="admin-form">
+<div class="bk-form">
+<div class="bk-input bk-input-wide"><label for="sh-bank">匯款資料</label><input id="sh-bank" type="text" maxlength="200" placeholder="例如：○○銀行（代碼 000）○○分行　戶名 ○○○　帳號 0000-0000-0000"><span class="bk-hint">客人下單或預約體驗課後會看到，也會寫在寄給客人的 Email 裡。留空則請客人用 LINE 索取。</span></div>
+<div class="bk-input"><label for="sh-free">滿多少免運（NT$）</label><input id="sh-free" type="number" inputmode="numeric" min="0" step="1"><span class="bk-hint">商品金額（扣優惠碼後）達到就免運。填 0 即不設免運。</span></div>
+<label class="admin-check"><input id="sh-mail" type="checkbox"> 寄 Email 通知客人（收到訂單、確認收款、出貨、預約確認）</label>
+</div>
+<div class="admin-bar" style="margin: 0"><button type="submit" class="chip" aria-pressed="true">儲存</button><span id="sh-status" role="status" style="color: var(--muted)"></span></div>
+</form>
+
+<h2 class="admin-h2">資料備份</h2>
+<div class="admin-bar"><button type="button" class="chip" id="backup">下載備份檔</button><span id="backup-status" role="status" style="color: var(--muted)"></span></div>
+<p class="bk-hint" style="margin: -8px 0 28px">把預約、訂單、客人、積分、貨品資料存成一個檔案（不含相片與後台帳號）。建議每月下載一次，存到雲端硬碟。</p>
+
 <h2 class="admin-h2">通知收件人</h2>
 <form id="notify" class="admin-bar">
 <input id="n-emails" type="text" placeholder="例如 boss@example.com, staff@example.com" aria-label="接收預約通知的 Email" style="flex: 1 1 320px">
@@ -231,6 +315,8 @@
       body: body ? JSON.stringify(body) : undefined,
     }).then(function (res) {
       return res.json().then(function (data) {
+        // Signed out elsewhere, or the session ran out: back to the sign-in page.
+        if (res.status === 401 && path !== '/api/admin/login' && !$('panel').hidden) signedOut('登入已過期，請重新登入');
         if (!res.ok) { var err = new Error(data.error || '發生錯誤'); err.status = res.status; throw err; }
         return data;
       });
@@ -270,12 +356,12 @@
       wrap.className = 'admin-table';
       var table = document.createElement('table');
       var head = document.createElement('tr');
-      ['時段', '工作室', '項目', '人數', '姓名', '電話', 'LINE', '備註', '末五碼', '編號', '狀態', ''].forEach(function (t) { head.appendChild(cell('th', t)); });
+      ['時段', '工作室', '項目', '人數', '姓名', '電話', 'LINE', 'Email', '備註', '末五碼', '編號', '狀態', ''].forEach(function (t) { head.appendChild(cell('th', t)); });
       table.appendChild(head);
       byDate[date].forEach(function (b) {
         var tr = document.createElement('tr');
         if (b.status === 'cancelled') tr.className = 'is-cancelled';
-        [b.time, STUDIO[b.studio], TYPE[b.type], b.people, b.name, b.phone, b.line_id, b.note, b.pay_last5, b.code, STATUS[b.status]].forEach(function (v) { tr.appendChild(cell('td', v)); });
+        [b.time, STUDIO[b.studio], TYPE[b.type], b.people, b.name, b.phone, b.line_id, b.email, b.note, b.pay_last5, b.code, STATUS[b.status]].forEach(function (v) { tr.appendChild(cell('td', v)); });
         var acts = document.createElement('td');
         acts.className = 'admin-actions';
         if (b.status !== 'confirmed' && b.status !== 'cancelled') acts.appendChild(action('確認', b, 'confirmed'));
@@ -316,38 +402,67 @@
     });
   }
 
+  var me = null; // who is signed in: { name, username, role, master }
+  var isOwner = function () { return Boolean(me && me.role === 'owner'); };
+
+  function signedOut(message) {
+    token = '';
+    me = null;
+    try { sessionStorage.removeItem('ssc-admin'); } catch (e) {}
+    $('panel').hidden = true;
+    $('login').hidden = false;
+    $('token').value = '';
+    var box = $('login-error');
+    box.textContent = message || '';
+    box.hidden = !message;
+  }
+
   function load() {
-    return api('GET', '/api/admin/bookings').then(function (data) {
+    return api('GET', '/api/admin/me').then(function (who) {
+      me = who;
+      // Pages a member of staff can't use are taken off the menu.
+      document.querySelectorAll('[data-owner]').forEach(function (el) { el.hidden = !isOwner(); });
+      $('who').textContent = who.name + '（' + (isOwner() ? '店主' : '店員') + '）';
+      $('me-info').textContent = '登入身分：' + who.name + '（' + (who.master ? '主帳號' : who.username) + '）。' +
+        (who.master ? '主帳號的密碼要在 Cloudflare 後台更改。建議到「帳號管理」為每個人開自己的帳號，日常不要共用主帳號。' : '');
+      $('me-form').hidden = who.master;
+      var tab = document.querySelector('[data-tab][aria-pressed="true"]');
+      if (tab && tab.hidden) go('home');
+      return api('GET', '/api/admin/bookings');
+    }).then(function (data) {
       $('login').hidden = true;
       $('panel').hidden = false;
-      try { sessionStorage.setItem('ssc-admin', token); } catch (e) {}
       bookingData = data;
       render(data);
       renderHome();
       loadProducts();
       loadOrders();
       loadCustomers();
-      loadReport();
+      if (isOwner()) { loadReport(); fillShop(data.settings.shop); }
     }).catch(function (err) {
-      $('login').hidden = false;
-      $('panel').hidden = true;
-      var box = $('login-error');
-      box.textContent = err.status === 401 ? '密碼不正確' : err.message;
-      box.hidden = false;
+      signedOut(err.status === 401 ? '' : err.message);
     });
   }
 
   $('login').addEventListener('submit', function (e) {
     e.preventDefault();
-    token = $('token').value;
-    load();
+    var box = $('login-error');
+    box.hidden = true;
+    token = '';
+    api('POST', '/api/admin/login', { username: $('username').value, password: $('token').value }).then(function (res) {
+      // Only the session token is kept, and only until this browser tab is closed.
+      token = res.token;
+      try { sessionStorage.setItem('ssc-admin', token); } catch (e2) {}
+      $('token').value = '';
+      return load();
+    }).catch(function (err) {
+      box.textContent = err.message;
+      box.hidden = false;
+    });
   });
   $('reload').addEventListener('click', load);
   $('logout').addEventListener('click', function () {
-    token = '';
-    try { sessionStorage.removeItem('ssc-admin'); } catch (e) {}
-    $('panel').hidden = true;
-    $('login').hidden = false;
+    api('POST', '/api/admin/logout').catch(function () {}).then(function () { signedOut(''); });
   });
   $('notify').addEventListener('submit', function (e) {
     e.preventDefault();
@@ -376,6 +491,9 @@
     try { sessionStorage.setItem('ssc-admin-tab', name); } catch (e) {}
     // Figures move whenever anything else changes, so the report is fetched fresh each time it is opened.
     if (name === 'report' && token) loadReport();
+    if (name === 'promos' && token) loadPromos();
+    if (name === 'staff' && token) loadStaff();
+    if (name === 'audit' && token) loadAudit();
     if (name === 'points' && token) loadPoints();
     // On a phone the menu slides away once a page is chosen.
     $('side').classList.remove('is-open');
@@ -406,6 +524,32 @@
   var products = [];
   var editing = null;   // the product in the form, or null for a new one
   var photoBlob = null; // a newly chosen photo, already resized
+  var gallery = [];     // the extra photos in the form: { id, url }
+
+  function uploadPhoto(blob) {
+    return fetch(API + '/api/admin/images', {
+      method: 'POST', headers: { 'Content-Type': 'image/jpeg', Authorization: 'Bearer ' + token }, body: blob,
+    }).then(function (res) {
+      return res.json().then(function (data) { if (!res.ok) throw new Error(data.error || '相片上傳失敗'); return data; });
+    });
+  }
+
+  function renderGallery() {
+    var box = $('p-gallery');
+    box.textContent = '';
+    gallery.forEach(function (g, at) {
+      var wrap = document.createElement('span');
+      wrap.className = 'admin-gallery-item';
+      var img = document.createElement('img');
+      img.src = g.url; img.alt = '';
+      var x = document.createElement('button');
+      x.type = 'button'; x.textContent = '移除'; x.className = 'cart-remove';
+      x.addEventListener('click', function () { gallery.splice(at, 1); renderGallery(); });
+      wrap.appendChild(img); wrap.appendChild(x);
+      box.appendChild(wrap);
+    });
+    $('p-more').disabled = gallery.length >= 5;
+  }
 
   function priceText(p) {
     return p.price == null ? '請洽詢' : 'NT$' + Number(p.price).toLocaleString('en-US') + (p.priceFrom ? ' 起' : '');
@@ -424,7 +568,7 @@
     info.appendChild(cell('strong', p.name));
     info.appendChild(cell('span', (CAT[p.cat] || '未分類') + (p.note ? ' ・ ' + p.note : '')));
     row.appendChild(info);
-    var price = cell('span', priceText(p));
+    var price = cell('span', p.salePrice != null ? '特價 ' + money(p.salePrice) : priceText(p));
     price.className = 'admin-product-price';
     row.appendChild(price);
     var state = cell('span', PSTATUS[p.status] + (p.stock == null ? '' : ' ・ 庫存 ' + p.stock));
@@ -652,6 +796,25 @@
     $('p-from').checked = Boolean(p && p.priceFrom);
     $('p-note').value = p ? p.note : '';
     $('p-link').value = p ? p.link : '';
+    $('p-sale').value = p && p.salePrice != null ? p.salePrice : '';
+    $('p-desc').value = p ? p.description : '';
+    // Three rows for options, filled with what the product already has.
+    var opts = $('p-options');
+    opts.textContent = '';
+    for (var i = 0; i < 3; i++) {
+      var o = (p && p.options[i]) || { name: '', values: [] };
+      var row = document.createElement('div');
+      row.className = 'admin-option';
+      var on = textInput(o.name, 12, '名稱，例如 戒圍');
+      on.setAttribute('aria-label', '規格名稱 ' + (i + 1));
+      var ov = textInput(o.values.join('、'), 400, '選擇，用頓號或逗號分開');
+      ov.setAttribute('aria-label', '規格選擇 ' + (i + 1));
+      row.appendChild(on); row.appendChild(ov);
+      opts.appendChild(row);
+    }
+    gallery = (p ? p.galleryIds : []).map(function (id, at) { return { id: id, url: p.images[p.images.length - p.galleryIds.length + at] }; });
+    renderGallery();
+    $('p-more').value = '';
     $('p-photo').value = '';
     $('p-preview').hidden = !(p && p.image);
     if (p && p.image) $('p-preview').src = p.image;
@@ -708,18 +871,34 @@
       $('p-error').hidden = true;
     }).catch(function (err) { photoBlob = null; $('p-photo').value = ''; formError(err); });
   });
+  // Extra photos are uploaded as soon as they are chosen; they only stick once the product is saved.
+  $('p-more').addEventListener('change', function () {
+    var files = Array.prototype.slice.call($('p-more').files, 0, 5 - gallery.length);
+    var chain = Promise.resolve();
+    files.forEach(function (file) {
+      chain = chain.then(function () { return shrink(file); }).then(uploadPhoto).then(function (data) {
+        gallery.push({ id: data.id, url: data.url });
+        renderGallery();
+      });
+    });
+    chain.then(function () { $('p-more').value = ''; $('p-error').hidden = true; }).catch(formError);
+  });
   $('p-form').addEventListener('submit', function (e) {
     e.preventDefault();
     $('p-error').hidden = true;
     $('p-save').disabled = true;
     $('p-save').textContent = '儲存中…';
-    var upload = !photoBlob ? Promise.resolve(null) : fetch(API + '/api/admin/images', {
-      method: 'POST', headers: { 'Content-Type': 'image/jpeg', Authorization: 'Bearer ' + token }, body: photoBlob,
-    }).then(function (res) {
-      return res.json().then(function (data) { if (!res.ok) throw new Error(data.error || '相片上傳失敗'); return data.id; });
-    });
+    var upload = !photoBlob ? Promise.resolve(null) : uploadPhoto(photoBlob).then(function (data) { return data.id; });
     upload.then(function (imageId) {
+      var options = [];
+      document.querySelectorAll('#p-options .admin-option').forEach(function (row) {
+        var inputs = row.querySelectorAll('input');
+        var values = inputs[1].value.split(/[、,，]+/).map(function (v) { return v.trim(); }).filter(Boolean);
+        if (inputs[0].value.trim() || values.length) options.push({ name: inputs[0].value.trim(), values: values });
+      });
       var body = {
+        salePrice: $('p-sale').value, description: $('p-desc').value, options: options,
+        galleryIds: gallery.map(function (g) { return g.id; }),
         name: $('p-name').value, stone: $('p-stone').value, cat: $('p-cat').value, supply: $('p-supply').value,
         status: $('p-status').value, price: $('p-price').value, priceFrom: $('p-from').checked, stock: $('p-stock').value,
         sort: $('p-sort').value || 0, note: $('p-note').value, link: $('p-link').value, imageId: imageId,
@@ -752,7 +931,7 @@
   var money = function (n) { return 'NT$' + Number(n).toLocaleString('en-US'); };
 
   function patchOrder(o, body) {
-    return api('PATCH', '/api/admin/orders/' + o.id, body).then(function () { loadOrders(); loadProducts(); loadCustomers(); loadReport(); });
+    return api('PATCH', '/api/admin/orders/' + o.id, body).then(function () { loadOrders(); loadProducts(); loadCustomers(); if (isOwner()) loadReport(); });
   }
 
   function orderCard(o) {
@@ -768,10 +947,10 @@
     head.appendChild(st);
     card.appendChild(head);
     var ul = document.createElement('ul');
-    o.items.forEach(function (it) { ul.appendChild(cell('li', it.name + ' × ' + it.qty + '　' + money(it.price * it.qty))); });
+    o.items.forEach(function (it) { ul.appendChild(cell('li', it.name + (it.options ? '（' + it.options + '）' : '') + ' × ' + it.qty + '　' + money(it.price * it.qty))); });
     card.appendChild(ul);
     card.appendChild(cell('div', (shipping[o.ship_method] ? shipping[o.ship_method].name : o.ship_method) + (o.ship_to ? '：' + o.ship_to : '') +
-      (o.discount ? '　積分折抵 −' + money(o.discount) : '') + '　運費 ' + money(o.ship_fee) + '　合計 ' + money(o.total) +
+      (o.promo_discount ? '　優惠碼 ' + o.promo_code + ' −' + money(o.promo_discount) : '') + (o.discount ? '　積分折抵 −' + money(o.discount) : '') + '　運費 ' + money(o.ship_fee) + '　合計 ' + money(o.total) +
       (o.points_earned ? '　已回饋 ' + o.points_earned + ' 點' : '')));
     if (o.pay_last5) card.appendChild(cell('div', '匯款末五碼：' + o.pay_last5));
     if (o.email) card.appendChild(cell('div', 'Email：' + o.email));
@@ -1068,6 +1247,7 @@
         $('pt-earn').value = data.rules.earnPer;
         $('pt-value').value = data.rules.pointValue;
         $('pt-class').value = data.rules.classPoints;
+        $('pt-expire').value = data.rules.expireMonths;
       }
       $('pt-rate').textContent = data.rules.earnPer
         ? '目前相當於消費回饋 ' + (Math.round(data.rules.pointValue / data.rules.earnPer * 1000) / 10) + '%。改規則只影響之後入的點，已經發出的點數不變。'
@@ -1084,7 +1264,7 @@
   $('pt-rules').addEventListener('submit', function (e) {
     e.preventDefault();
     $('pt-status').textContent = '儲存中…';
-    api('PUT', '/api/admin/settings', { points: { earnPer: $('pt-earn').value, pointValue: $('pt-value').value, classPoints: $('pt-class').value } })
+    api('PUT', '/api/admin/settings', { points: { earnPer: $('pt-earn').value, pointValue: $('pt-value').value, classPoints: $('pt-class').value, expireMonths: $('pt-expire').value } })
       .then(function () { $('pt-status').textContent = '已儲存'; document.activeElement.blur(); return loadPoints(); })
       .catch(function (err) { $('pt-status').textContent = err.message; });
   });
@@ -1098,6 +1278,174 @@
         loadPoints(); loadCustomers();
       }).catch(function (err) { $('pt-adjust-status').textContent = err.message; });
   });
+
+  // ---- Files to keep: CSV exports and the backup ----
+  function csvQuote(v) {
+    v = v == null ? '' : String(v);
+    // A leading = + - @ would be run as a formula by spreadsheet programs.
+    if (/^[=+\-@]/.test(v)) v = "'" + v;
+    return '"' + v.replace(/"/g, '""') + '"';
+  }
+  function saveFile(name, text, type) {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: type }));
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+  function saveCsv(name, rows) {
+    saveFile(name + '-' + day(new Date().toISOString()) + '.csv', '\ufeff' + rows.map(function (r) { return r.map(csvQuote).join(','); }).join('\r\n'), 'text/csv;charset=utf-8');
+  }
+  $('o-export').addEventListener('click', function () {
+    var rows = [['訂單編號', '日期', '狀態', '姓名', '電話', 'Email', 'LINE', '品項', '商品小計', '優惠碼', '優惠碼折扣', '積分折抵', '運費', '合計', '取貨方式', '門市／地址', '寄件編號', '末五碼', '客人備註', '內部備註']];
+    (orderFilter === 'open' ? orders.filter(function (o) { return o.status !== 'done' && o.status !== 'cancelled'; }) : orders).forEach(function (o) {
+      rows.push([o.code, day(o.created_at), OSTATUS[o.status], o.name, o.phone, o.email, o.line_id,
+        o.items.map(function (it) { return it.name + (it.options ? '（' + it.options + '）' : '') + ' × ' + it.qty; }).join('；'),
+        o.subtotal, o.promo_code, o.promo_discount, o.discount, o.ship_fee, o.total,
+        shipping[o.ship_method] ? shipping[o.ship_method].name : o.ship_method, o.ship_to, o.tracking, o.pay_last5, o.note, o.admin_note]);
+    });
+    saveCsv('orders', rows);
+  });
+  $('b-export').addEventListener('click', function () {
+    var rows = [['預約編號', '日期', '時段', '工作室', '項目', '人數', '姓名', '電話', 'LINE', 'Email', '狀態', '末五碼', '備註']];
+    (bookingData ? bookingData.bookings : []).forEach(function (b) {
+      rows.push([b.code, b.date, b.time, STUDIO[b.studio], TYPE[b.type], b.people, b.name, b.phone, b.line_id, b.email, STATUS[b.status], b.pay_last5, b.note]);
+    });
+    saveCsv('bookings', rows);
+  });
+  $('backup').addEventListener('click', function () {
+    $('backup-status').textContent = '準備中…';
+    api('GET', '/api/admin/backup').then(function (data) {
+      saveFile('strangecat-backup-' + day(data.exported_at) + '.json', JSON.stringify(data, null, 1), 'application/json');
+      $('backup-status').textContent = '已下載';
+    }).catch(function (err) { $('backup-status').textContent = err.message; });
+  });
+
+  // ---- Shop settings ----
+  function fillShop(shop) {
+    if (document.activeElement && document.activeElement.form === $('shop-form')) return;
+    $('sh-bank').value = shop.bankInfo;
+    $('sh-free').value = shop.freeShipOver;
+    $('sh-mail').checked = shop.customerEmails;
+  }
+  $('shop-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    $('sh-status').textContent = '儲存中…';
+    api('PUT', '/api/admin/settings', { shop: { bankInfo: $('sh-bank').value, freeShipOver: $('sh-free').value, customerEmails: $('sh-mail').checked } })
+      .then(function () { $('sh-status').textContent = '已儲存'; })
+      .catch(function (err) { $('sh-status').textContent = err.message; });
+  });
+
+  // ---- Promo codes ----
+  var promoEditing = null;
+  function promoForm(p) {
+    promoEditing = p || null;
+    $('pr-title').textContent = p ? '修改優惠碼 ' + p.code : '新增優惠碼';
+    $('pr-code').value = p ? p.code : '';
+    $('pr-kind').value = p ? p.kind : 'percent';
+    $('pr-value').value = p ? p.value : '';
+    $('pr-min').value = p && p.min_spend ? p.min_spend : '';
+    $('pr-max').value = p && p.max_uses != null ? p.max_uses : '';
+    $('pr-starts').value = p ? p.starts || '' : '';
+    $('pr-ends').value = p ? p.ends || '' : '';
+    $('pr-active').checked = p ? Boolean(p.active) : true;
+    $('pr-status').textContent = '';
+  }
+  // A table whose last column holds buttons: `actions(item)` returns the buttons for that row.
+  function actionTable(id, head, items, cells, actions) {
+    table(id, head.concat(['']), items.map(cells));
+    var rows = $(id).querySelectorAll('tr');
+    items.forEach(function (item, at) {
+      var td = document.createElement('td');
+      td.className = 'admin-actions';
+      actions(item).forEach(function (b) { td.appendChild(b); });
+      rows[at + 1].appendChild(td);
+    });
+  }
+  function button(label, onClick, danger) {
+    var b = document.createElement('button');
+    b.type = 'button'; b.className = 'chip' + (danger ? ' admin-danger' : ''); b.textContent = label;
+    b.addEventListener('click', function () {
+      // Anything destructive takes two presses instead of a pop-up question.
+      if (danger && b.textContent !== '確定？') { b.textContent = '確定？'; return; }
+      onClick();
+    });
+    return b;
+  }
+  function loadPromos() {
+    return api('GET', '/api/admin/promos').then(function (data) {
+      actionTable('pr-list', ['優惠碼', '折扣', '最低消費', '已用', '有效期', '狀態'], data.promos, function (p) {
+        return [p.code, p.kind === 'percent' ? '減 ' + p.value + '%' : '減 ' + money(p.value), p.min_spend ? money(p.min_spend) : '不限',
+          p.used + (p.max_uses != null ? ' / ' + p.max_uses : ''), (p.starts || '即日') + ' – ' + (p.ends || '不限'), p.active ? '啟用' : '停用'];
+      }, function (p) {
+        return [button('修改', function () { promoForm(p); $('pr-form').scrollIntoView({ block: 'start' }); }),
+          button('刪除', function () { api('DELETE', '/api/admin/promos/' + p.id).then(loadPromos); }, true)];
+      });
+    });
+  }
+  $('pr-reset').addEventListener('click', function () { promoForm(null); });
+  $('pr-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var body = { code: $('pr-code').value, kind: $('pr-kind').value, value: $('pr-value').value, minSpend: $('pr-min').value, maxUses: $('pr-max').value,
+      starts: $('pr-starts').value, ends: $('pr-ends').value, active: $('pr-active').checked };
+    (promoEditing ? api('PUT', '/api/admin/promos/' + promoEditing.id, body) : api('POST', '/api/admin/promos', body)).then(function () {
+      promoForm(null);
+      $('pr-status').textContent = '已儲存';
+      return loadPromos();
+    }).catch(function (err) { $('pr-status').textContent = err.message; });
+  });
+
+  // ---- Accounts ----
+  var staffEditing = null;
+  function staffForm(m) {
+    staffEditing = m || null;
+    $('st-title').textContent = m ? '修改帳號 ' + m.name : '新增帳號';
+    $('st-name').value = m ? m.name : '';
+    $('st-username').value = m ? m.username : '';
+    $('st-role').value = m ? m.role : 'staff';
+    $('st-password').value = '';
+    $('st-password').required = !m;
+    $('st-password').placeholder = m ? '留空＝不更改密碼' : '至少 8 個字元';
+    $('st-active').checked = m ? Boolean(m.active) : true;
+    $('st-status').textContent = '';
+  }
+  function loadStaff() {
+    return api('GET', '/api/admin/staff').then(function (data) {
+      actionTable('st-list', ['姓名', '登入帳號', '權限', '狀態', '建立日期'], data.staff, function (m) {
+        return [m.name, m.username, m.role === 'owner' ? '店主' : '店員', m.active ? '可以登入' : '已停用', day(m.created_at)];
+      }, function (m) {
+        return [button('修改', function () { staffForm(m); $('st-form').scrollIntoView({ block: 'start' }); }),
+          button('刪除', function () { api('DELETE', '/api/admin/staff/' + m.id).then(loadStaff).catch(function (err) { $('st-status').textContent = err.message; }); }, true)];
+      });
+    });
+  }
+  $('st-reset').addEventListener('click', function () { staffForm(null); });
+  $('st-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var body = { name: $('st-name').value, username: $('st-username').value, role: $('st-role').value, password: $('st-password').value, active: $('st-active').checked };
+    (staffEditing ? api('PUT', '/api/admin/staff/' + staffEditing.id, body) : api('POST', '/api/admin/staff', body)).then(function () {
+      staffForm(null);
+      $('st-status').textContent = '已儲存';
+      return loadStaff();
+    }).catch(function (err) { $('st-status').textContent = err.message; });
+  });
+  $('me-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    api('PUT', '/api/admin/password', { current: $('me-current').value, next: $('me-next').value }).then(function () {
+      $('me-current').value = ''; $('me-next').value = '';
+      $('me-status').textContent = '密碼已更改';
+    }).catch(function (err) { $('me-status').textContent = err.message; });
+  });
+
+  function loadAudit() {
+    return api('GET', '/api/admin/audit').then(function (data) {
+      table('au-list', ['時間', '誰', '做了什麼', '內容'], data.audit.map(function (a) {
+        var t = new Date(Date.parse(a.created_at) + 8 * 3600000).toISOString();
+        return [t.slice(0, 10) + ' ' + t.slice(11, 16), a.staff_name, a.action, a.detail];
+      }));
+    });
+  }
 
   // ---- Report ----
   function table(id, head, rows) {
