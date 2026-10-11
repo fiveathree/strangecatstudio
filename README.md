@@ -22,6 +22,7 @@
 
 - `css/site.css`：色彩變數與基本樣式。淺色版在 `:root`，黑色版在 `:root[data-theme="dark"]`，網站預設為黑色版，改顏色只需要改這裡。
 - `js/site.js`：中文斷行處理（把每個分句包成不拆開的一段，避免手機上落單字）、Calendly 嵌入、現貨篩選、自選配搭，以及右上角的黑色／淺色切換（選擇會記在瀏覽器的 `localStorage`），以及商品頁的選項與價格。
+- 網站圖示：`favicon.ico`（16／32／48px，放大貓咪本身，小尺寸才看得清）、`assets/favicon-32.png`、`assets/icon-192.png`、`assets/icon-512.png`、`assets/apple-touch-icon.png`，以及 `site.webmanifest`。都是由原本 640px 的 Logo 產生。
 - `assets/`：Logo、產品相片、開場影片（`hero.mp4` 與手機用的 `hero-mobile.mp4`）。
 - `assets/fonts/`：Noto Sans TC／Noto Serif TC（Google，SIL OFL 免費授權），只保留網站用到的字。**改過網站文字後要重跑 `python3 tools/build_fonts.py`**，否則新字會以裝置內建字型顯示。
 - 版面樣式目前寫在各頁的 inline `style` 內。
