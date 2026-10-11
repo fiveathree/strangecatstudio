@@ -294,6 +294,20 @@
         }
         grid.textContent = '';
         data.products.forEach(function (p) { grid.appendChild(productCard(p)); });
+        // Tell search engines what is for sale (name, photo, price, in stock or not).
+        var listed = data.products.filter(function (p) { return p.price != null; }).map(function (p, i) {
+          var item = { '@type': 'Product', name: p.name, description: p.note || p.name, brand: { '@type': 'Brand', name: '奇怪貓工作室' },
+            offers: { '@type': 'Offer', priceCurrency: 'TWD', price: p.price, url: window.location.href.split('?')[0],
+              availability: 'https://schema.org/' + (p.status === 'soldout' ? 'OutOfStock' : p.supply === 'made' ? 'MadeToOrder' : 'InStock') } };
+          if (p.image) item.image = new URL(p.image, window.location.href).href;
+          return { '@type': 'ListItem', position: i + 1, item: item };
+        });
+        if (listed.length) {
+          var ld = document.createElement('script');
+          ld.type = 'application/ld+json';
+          ld.textContent = JSON.stringify({ '@context': 'https://schema.org', '@type': 'ItemList', itemListElement: listed });
+          document.head.appendChild(ld);
+        }
         applyFilters();
       }).catch(function () {});
     }

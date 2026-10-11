@@ -1,0 +1,6 @@
+# Only read by search engines once the site has its own domain (robots.txt must sit at
+# the root of a domain). Until then admin.html and cart.html keep themselves out of
+# search results with their own "noindex" tags.
+User-agent: *
+Disallow: /admin.html
+Disallow: /cart.html

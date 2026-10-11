@@ -285,5 +285,27 @@ if (process.argv[2] === 'serve') {
   assert.equal(r.data.months[0].revenue, third.total);
   assert.ok(r.data.months.some((m) => m.bookings > 0));
 
+  // ---- Points rules and class points ----
+  assert.equal((await call('PUT', '/api/admin/settings', { points: { earnPer: 50, pointValue: 0, classPoints: 30 } }, 'test-token')).status, 400);
+  r = await call('PUT', '/api/admin/settings', { points: { earnPer: 50, pointValue: 2, classPoints: 30 } }, 'test-token');
+  assert.deepEqual(r.data.points, { earnPer: 50, pointValue: 2, classPoints: 30 });
+  assert.equal((await call('GET', '/api/products')).data.points.earnPer, 50);
+  assert.equal((await call('GET', '/api/admin/bookings', null, 'test-token')).data.settings.notify_emails, 'boss@example.com,staff@example.com', 'saving rules leaves the recipients alone');
+  const classDay = nextDate('tn', 30);
+  r = await call('POST', '/api/bookings', { ...person, date: classDay, time: '13:30', phone: '0977000111', name: '學員' });
+  const classCode = r.data.code;
+  r = await call('GET', '/api/admin/bookings', null, 'test-token');
+  const classBooking = r.data.bookings.find((b) => b.code === classCode);
+  await call('PATCH', `/api/admin/bookings/${classBooking.id}`, { status: 'confirmed' }, 'test-token');
+  await call('PATCH', `/api/admin/bookings/${classBooking.id}`, { status: 'confirmed' }, 'test-token');
+  assert.equal((await call('POST', '/api/points/balance', { phone: '0977000111', code: classCode })).data.points, 30, 'class points once, and a booking code proves who you are');
+  await call('PATCH', `/api/admin/bookings/${classBooking.id}`, { status: 'cancelled' }, 'test-token');
+  assert.equal((await call('GET', '/api/admin/customers/0977000111', null, 'test-token')).data.points, 0);
+  assert.equal((await call('GET', '/api/admin/points')).status, 401);
+  r = await call('GET', '/api/admin/points', null, 'test-token');
+  assert.equal(r.data.totals.outstanding, r.data.totals.issued - r.data.totals.used);
+  assert.ok(r.data.ledger.length > 5 && r.data.ledger[0].name);
+  assert.equal(r.data.top[0].phone, '0911222333');
+
   console.log('all booking checks passed');
 }

@@ -236,7 +236,7 @@
         maxQty = data.maxQtyPerItem || 10;
         rules = data.points || rules;
         $('cart-points').hidden = !rules.earnPer;
-        $('cart-points-hint').textContent = '買過的客人可以用積分折抵，每 1 點折 ' + money(rules.pointValue) + '。先在上面填好手機，再輸入任何一張過往訂單的編號來查詢。';
+        $('cart-points-hint').textContent = '買過的客人可以用積分折抵，每 1 點折 ' + money(rules.pointValue) + '。先在上面填好手機，再輸入任何一筆過往訂單或預約的編號來查詢。';
         var row = $('cart-ship');
         if (!row.children.length) {
           Object.keys(shipping).forEach(function (key) {

@@ -9,13 +9,14 @@
 //   PATCH /api/admin/bookings/:id        { status }
 //   POST  /api/admin/closures            { studio, date, reason }
 //   DELETE /api/admin/closures           { studio, date }
-//   PUT   /api/admin/settings            { notify_emails }
+//   PUT   /api/admin/settings            { notify_emails } or { points: { earnPer, pointValue, classPoints } }
 //   GET/POST /api/admin/products, PUT/DELETE /api/admin/products/:id
 //   POST  /api/admin/images              (photo bytes) -> { id, url }
 //   POST  /api/admin/categories { kind, name }, PUT/DELETE /api/admin/categories/:id
 //   GET   /api/admin/orders, PATCH /api/admin/orders/:id   { status, tracking, admin_note }
 //   GET/POST /api/admin/customers, GET/PUT /api/admin/customers/:phone
 //   POST  /api/admin/customers/:phone/points   { delta, reason }
+//   GET   /api/admin/points                    loyalty rules, totals, recent ledger
 //   GET   /api/admin/report                    sales and customer figures
 // Public shop:
 //   GET  /api/products, GET /api/images/:id
@@ -56,7 +57,9 @@ export const SHOP = {
   // Loyalty points: one point for every `earnPer` NT$ of goods (shipping excluded),
   // given when the studio marks the order as paid. Each point is worth `pointValue` NT$
   // off a later order. Set earnPer to 0 to switch points off.
-  points: { earnPer: 100, pointValue: 1 },
+  // These are only the starting values: the studio changes them under 積分管理 in the back office.
+  // classPoints = points given when a class booking is confirmed (0 = none).
+  points: { earnPer: 100, pointValue: 1, classPoints: 0 },
 };
 // -----------------------------------------------------------------------------
 
@@ -172,6 +175,18 @@ async function rememberCustomer(env, { name, phone, email = '', line = '', marke
   ).bind(phone, name, email, line, now, marketing ? 1 : 0).run();
 }
 
+/** The loyalty rules in force: what the studio saved, or the starting values above. */
+async function pointRules(env) {
+  const rows = await env.DB.prepare("SELECT key, value FROM settings WHERE key IN ('points_earn_per', 'points_value', 'points_class')").all();
+  const saved = Object.fromEntries(rows.results.map((r) => [r.key, Number(r.value)]));
+  const pick = (key, fallback) => (Number.isInteger(saved[key]) && saved[key] >= 0 ? saved[key] : fallback);
+  return {
+    earnPer: pick('points_earn_per', SHOP.points.earnPer),
+    pointValue: Math.max(pick('points_value', SHOP.points.pointValue), 1),
+    classPoints: pick('points_class', SHOP.points.classPoints),
+  };
+}
+
 async function pointsBalance(env, phone) {
   const row = await env.DB.prepare('SELECT COALESCE(SUM(delta), 0) AS n FROM points WHERE phone = ?').bind(phone).first();
   return row.n;
@@ -185,14 +200,15 @@ async function addPoints(env, phone, delta, reason, orderId = null) {
 
 /** Points are tied to a phone number, so spending them needs proof: the code of one of that phone's orders. */
 async function ownsOrder(env, phone, code) {
-  return Boolean(code && phone && await env.DB.prepare('SELECT 1 FROM orders WHERE code = ? AND phone = ?').bind(code, phone).first());
+  if (!code || !phone) return false;
+  return Boolean(await env.DB.prepare('SELECT 1 FROM orders WHERE code = ?1 AND phone = ?2 UNION SELECT 1 FROM bookings WHERE code = ?1 AND phone = ?2').bind(code, phone).first());
 }
 
 async function checkPoints(body, env) {
   const phone = clean(body.phone, 20).replace(/[^\d+]/g, '');
   const code = clean(body.code, 12).toUpperCase();
-  if (!await ownsOrder(env, phone, code)) return [{ error: '找不到這筆訂單，請確認訂單編號與手機' }, 404];
-  return [{ points: await pointsBalance(env, phone), pointValue: SHOP.points.pointValue }, 200];
+  if (!await ownsOrder(env, phone, code)) return [{ error: '找不到這個編號，請確認訂單或預約編號與手機' }, 404];
+  return [{ points: await pointsBalance(env, phone), pointValue: (await pointRules(env)).pointValue }, 200];
 }
 
 function cors(env, request) {
@@ -428,6 +444,7 @@ async function createOrder(body, env, ctx) {
 
   const subtotal = lines.reduce((sum, l) => sum + l.price * l.qty, 0);
   const shipFee = SHOP.shipping[method].fee;
+  const rules = await pointRules(env);
 
   // Spending points: never more than the goods are worth, and only with a past order's code as proof.
   let pointsUsed = 0;
@@ -436,7 +453,7 @@ async function createOrder(body, env, ctx) {
     const fail = async (error, status) => { await putBackStock(env, taken); return [{ error }, status]; };
     if (!Number.isInteger(wantPoints) || wantPoints < 0) return fail('積分數量不正確', 400);
     if (!await ownsOrder(env, phone, clean(body.pointsCode, 12).toUpperCase())) return fail('積分驗證失敗：請確認過往訂單編號與手機', 400);
-    pointsUsed = Math.min(wantPoints, Math.floor(subtotal / SHOP.points.pointValue));
+    pointsUsed = Math.min(wantPoints, Math.floor(subtotal / rules.pointValue));
     // The balance check lives inside the INSERT, so the same points can't be spent twice at once.
     const spent = await env.DB.prepare(
       `INSERT INTO points (phone, delta, reason, order_id, created_at)
@@ -444,7 +461,7 @@ async function createOrder(body, env, ctx) {
     ).bind(phone, pointsUsed, new Date().toISOString()).run();
     if (!spent.meta.changes) return fail('積分不足，請調整使用數量', 409);
   }
-  const discount = pointsUsed * SHOP.points.pointValue;
+  const discount = pointsUsed * rules.pointValue;
 
   const order = {
     code: newCode(), name, phone, email, line_id: clean(body.line, 40), ship_method: method, ship_to: shipTo,
@@ -467,7 +484,7 @@ async function createOrder(body, env, ctx) {
   }
   await rememberCustomer(env, { name, phone, email, line: order.line_id, marketing: Boolean(body.marketing) });
   notifyOrder(env, ctx, 'order', { ...order, items: lines });
-  const willEarn = SHOP.points.earnPer ? Math.floor((subtotal - discount) / SHOP.points.earnPer) : 0;
+  const willEarn = rules.earnPer ? Math.floor((subtotal - discount) / rules.earnPer) : 0;
   return [{ code: order.code, items: lines, subtotal, discount, pointsUsed, shipFee, total: order.total, shipName: SHOP.shipping[method].name, status: 'pending', willEarn }, 201];
 }
 
@@ -556,7 +573,7 @@ async function admin(request, url, env, ctx) {
     const from = isDate(url.searchParams.get('from')) ? url.searchParams.get('from') : taipeiToday();
     const rows = await env.DB.prepare('SELECT * FROM bookings WHERE date >= ? ORDER BY date, time, studio, id').bind(from).all();
     const closed = await env.DB.prepare('SELECT * FROM closures WHERE date >= ? ORDER BY date, studio').bind(from).all();
-    return [{ bookings: rows.results, closures: closed.results, config: CONFIG, settings: { notify_emails: await getSetting(env, 'notify_emails') } }, 200];
+    return [{ bookings: rows.results, closures: closed.results, config: CONFIG, settings: { notify_emails: await getSetting(env, 'notify_emails'), points: await pointRules(env) } }, 200];
   }
 
   const match = path.match(/^\/api\/admin\/bookings\/(\d+)$/);
@@ -565,7 +582,22 @@ async function admin(request, url, env, ctx) {
     if (!STATUSES.includes(body.status)) return [{ error: '狀態不正確' }, 400];
     const result = await env.DB.prepare('UPDATE bookings SET status = ? WHERE id = ?').bind(body.status, Number(match[1])).run();
     if (!result.meta.changes) return [{ error: '找不到這筆預約' }, 404];
-    notify(env, ctx, 'status', await env.DB.prepare('SELECT * FROM bookings WHERE id = ?').bind(Number(match[1])).first());
+    const booking = await env.DB.prepare('SELECT * FROM bookings WHERE id = ?').bind(Number(match[1])).first();
+    // Class points: given once when the class is confirmed, taken back if it is then cancelled.
+    // The ledger line names the booking, which is how "already given" is known.
+    if (booking.type === 'class') {
+      const reason = '體驗課 ' + booking.code + ' 回饋';
+      const given = (await env.DB.prepare('SELECT COALESCE(SUM(delta), 0) AS n FROM points WHERE phone = ? AND reason = ?').bind(booking.phone, reason).first()).n;
+      const { classPoints } = await pointRules(env);
+      if (booking.status === 'confirmed' && !given && classPoints) await addPoints(env, booking.phone, classPoints, reason);
+      if (booking.status === 'cancelled' && given > 0) {
+        // Never below zero: if some were already spent, only what is left comes back.
+        const back = Math.min(given, await pointsBalance(env, booking.phone));
+        await addPoints(env, booking.phone, -given, reason);
+        if (back < given) await addPoints(env, booking.phone, given - back, '體驗課 ' + booking.code + ' 取消，已用積分不追回');
+      }
+    }
+    notify(env, ctx, 'status', booking);
     return [{ ok: true }, 200];
   }
 
@@ -679,8 +711,9 @@ async function admin(request, url, env, ctx) {
     }
     // Points are earned once, the first time the studio confirms the money arrived.
     const nowPaid = ['paid', 'shipped', 'done'].includes(status) && !['paid', 'shipped', 'done'].includes(current.status);
-    if (nowPaid && !current.points_earned && SHOP.points.earnPer) {
-      const earned = Math.floor((current.subtotal - current.discount) / SHOP.points.earnPer);
+    const rules = await pointRules(env);
+    if (nowPaid && !current.points_earned && rules.earnPer) {
+      const earned = Math.floor((current.subtotal - current.discount) / rules.earnPer);
       if (earned) {
         await addPoints(env, current.phone, earned, '訂單 ' + current.code + ' 消費回饋', id);
         await env.DB.prepare('UPDATE orders SET points_earned = ? WHERE id = ?').bind(earned, id).run();
@@ -702,7 +735,7 @@ async function admin(request, url, env, ctx) {
              COALESCE((SELECT MAX(date) FROM bookings b WHERE b.phone = c.phone AND b.status != 'cancelled' AND b.date <= ?1), '')) AS last_seen
        FROM customers c ORDER BY c.updated_at DESC LIMIT 2000`
     ).bind(taipeiToday()).all();
-    return [{ customers: rows.results, points: SHOP.points }, 200];
+    return [{ customers: rows.results, points: await pointRules(env) }, 200];
   }
 
   // Adding someone by hand (a walk-in, an old customer from the notebook).
@@ -751,12 +784,41 @@ async function admin(request, url, env, ctx) {
     return [{ points: balance + delta }, 200];
   }
 
+  if (path === '/api/admin/points' && request.method === 'GET') {
+    const totals = await env.DB.prepare(
+      `SELECT COALESCE(SUM(CASE WHEN delta > 0 THEN delta ELSE 0 END), 0) AS issued,
+         COALESCE(SUM(CASE WHEN delta < 0 THEN -delta ELSE 0 END), 0) AS used,
+         COALESCE(SUM(delta), 0) AS outstanding,
+         (SELECT COUNT(*) FROM (SELECT phone FROM points GROUP BY phone HAVING SUM(delta) > 0)) AS holders
+       FROM points`
+    ).first();
+    const ledger = await env.DB.prepare(
+      'SELECT p.created_at, p.phone, p.delta, p.reason, c.name FROM points p LEFT JOIN customers c ON c.phone = p.phone ORDER BY p.id DESC LIMIT 200'
+    ).all();
+    const top = await env.DB.prepare(
+      'SELECT p.phone, c.name, SUM(p.delta) AS points FROM points p LEFT JOIN customers c ON c.phone = p.phone GROUP BY p.phone HAVING SUM(p.delta) > 0 ORDER BY points DESC LIMIT 20'
+    ).all();
+    return [{ rules: await pointRules(env), totals, ledger: ledger.results, top: top.results }, 200];
+  }
+
   if (path === '/api/admin/report' && request.method === 'GET') {
     return [await report(env), 200];
   }
 
   if (path === '/api/admin/settings' && request.method === 'PUT') {
     const body = await request.json().catch(() => ({}));
+    // Loyalty rules are saved on their own from the 積分管理 page.
+    if (body.points) {
+      const p = body.points;
+      const whole = (v, max) => Number.isInteger(Number(v)) && v !== '' && v !== null && Number(v) >= 0 && Number(v) <= max;
+      if (!whole(p.earnPer, 100000)) return [{ error: '「每消費多少元得 1 點」請填 0 或以上的整數（0 = 不送點）' }, 400];
+      if (!whole(p.pointValue, 1000) || Number(p.pointValue) < 1) return [{ error: '「1 點折多少元」請填 1 或以上的整數' }, 400];
+      if (!whole(p.classPoints, 100000)) return [{ error: '「體驗課送點」請填 0 或以上的整數' }, 400];
+      for (const [key, value] of [['points_earn_per', p.earnPer], ['points_value', p.pointValue], ['points_class', p.classPoints]]) {
+        await env.DB.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').bind(key, String(Number(value))).run();
+      }
+      return [{ ok: true, points: await pointRules(env) }, 200];
+    }
     const emails = clean(body.notify_emails, 300).split(/[\s,;，；]+/).filter(Boolean);
     if (emails.length > 5) return [{ error: '最多 5 個收件人' }, 400];
     const bad = emails.find((e) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
@@ -793,7 +855,7 @@ export default {
       } else if (url.pathname === '/api/bookings/payment' && request.method === 'POST') {
         result = await reportPayment(await request.json().catch(() => ({})), env, ctx);
       } else if (url.pathname === '/api/products' && request.method === 'GET') {
-        return json({ products: await listProducts(env, url.origin, false), categories: await listCategories(env), shipping: SHOP.shipping, maxQtyPerItem: SHOP.maxQtyPerItem, points: SHOP.points }, 200, { ...headers, 'Cache-Control': 'public, max-age=60' });
+        return json({ products: await listProducts(env, url.origin, false), categories: await listCategories(env), shipping: SHOP.shipping, maxQtyPerItem: SHOP.maxQtyPerItem, points: await pointRules(env) }, 200, { ...headers, 'Cache-Control': 'public, max-age=60' });
       } else if (url.pathname === '/api/orders' && request.method === 'POST') {
         result = await createOrder(await request.json().catch(() => ({})), env, ctx);
       } else if (url.pathname === '/api/orders/payment' && request.method === 'POST') {

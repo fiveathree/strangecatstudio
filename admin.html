@@ -35,6 +35,7 @@
 <button type="button" class="admin-nav" data-tab="categories" aria-pressed="false">分類管理</button>
 <div class="admin-nav-group">客人</div>
 <button type="button" class="admin-nav" data-tab="customers" aria-pressed="false">客人名單</button>
+<button type="button" class="admin-nav" data-tab="points" aria-pressed="false">積分管理</button>
 <div class="admin-nav-group">分析</div>
 <button type="button" class="admin-nav" data-tab="report" aria-pressed="false">報表</button>
 <div class="admin-nav-group">系統</div>
@@ -108,6 +109,36 @@
 </div>
 <div id="cu-detail" class="admin-detail" hidden></div>
 <div id="cu-list" class="admin-products"></div>
+</section>
+
+<section id="tab-points" hidden>
+<div id="pt-tiles" class="admin-tiles"></div>
+
+<h2 class="admin-h2" style="margin-top: 36px">積分規則</h2>
+<form id="pt-rules" class="admin-form">
+<div class="bk-form">
+<div class="bk-input"><label for="pt-earn">每消費多少元得 1 點</label><input id="pt-earn" type="number" inputmode="numeric" min="0" step="1" required><span class="bk-hint">只計商品金額，訂單確認收款時入點。填 0 即不送點。</span></div>
+<div class="bk-input"><label for="pt-value">1 點可折多少元</label><input id="pt-value" type="number" inputmode="numeric" min="1" step="1" required><span class="bk-hint">只能折商品金額，不能折運費。</span></div>
+<div class="bk-input"><label for="pt-class">體驗課確認後送幾點</label><input id="pt-class" type="number" inputmode="numeric" min="0" step="1" required><span class="bk-hint">每筆體驗課預約按「確認」時送一次。填 0 即不送。</span></div>
+</div>
+<div class="admin-bar" style="margin: 0"><button type="submit" class="chip" aria-pressed="true">儲存規則</button><span id="pt-status" role="status" style="color: var(--muted)"></span></div>
+<p class="bk-hint" id="pt-rate" style="margin: 0"></p>
+</form>
+
+<h2 class="admin-h2">手動加減積分</h2>
+<form id="pt-adjust" class="admin-bar">
+<input id="pt-phone" type="tel" list="pt-customers" placeholder="客人電話（可輸入姓名搜尋）" aria-label="客人電話" required style="flex: 1 1 220px">
+<datalist id="pt-customers"></datalist>
+<input id="pt-delta" type="number" step="1" placeholder="＋加 或 −扣" aria-label="積分增減" required style="width: 130px">
+<input id="pt-reason" type="text" maxlength="60" placeholder="原因（例如：生日禮）" aria-label="原因" style="flex: 1 1 180px">
+<button type="submit" class="chip">調整</button>
+<span id="pt-adjust-status" role="status" style="color: var(--muted)"></span>
+</form>
+
+<div class="admin-cols admin-cols-2" style="margin-top: 32px">
+<div><h2 class="admin-h2">積分最多的客人</h2><div class="admin-table"><table id="pt-top"></table></div></div>
+<div><h2 class="admin-h2">最近的積分紀錄</h2><div class="admin-table"><table id="pt-ledger"></table></div></div>
+</div>
 </section>
 
 <section id="tab-report" hidden>
@@ -345,6 +376,7 @@
     try { sessionStorage.setItem('ssc-admin-tab', name); } catch (e) {}
     // Figures move whenever anything else changes, so the report is fetched fresh each time it is opened.
     if (name === 'report' && token) loadReport();
+    if (name === 'points' && token) loadPoints();
     // On a phone the menu slides away once a page is chosen.
     $('side').classList.remove('is-open');
     $('menu').setAttribute('aria-expanded', 'false');
@@ -1016,6 +1048,55 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
+  });
+
+  // ---- Points ----
+  function loadPoints() {
+    return api('GET', '/api/admin/points').then(function (data) {
+      var t = data.totals;
+      var tiles = $('pt-tiles');
+      tiles.textContent = '';
+      [['累計發出', t.issued + ' 點'], ['已使用／收回', t.used + ' 點'], ['未使用', t.outstanding + ' 點'],
+        ['未使用折合', money(t.outstanding * data.rules.pointValue)], ['持有積分的客人', t.holders + ' 位']].forEach(function (x) {
+        var tile = document.createElement('div');
+        tile.className = 'admin-tile';
+        tile.appendChild(cell('span', x[0]));
+        tile.appendChild(cell('strong', x[1]));
+        tiles.appendChild(tile);
+      });
+      if (document.activeElement.form !== $('pt-rules')) {
+        $('pt-earn').value = data.rules.earnPer;
+        $('pt-value').value = data.rules.pointValue;
+        $('pt-class').value = data.rules.classPoints;
+      }
+      $('pt-rate').textContent = data.rules.earnPer
+        ? '目前相當於消費回饋 ' + (Math.round(data.rules.pointValue / data.rules.earnPer * 1000) / 10) + '%。改規則只影響之後入的點，已經發出的點數不變。'
+        : '目前消費不送點。';
+      table('pt-top', ['客人', '電話', '積分'], data.top.map(function (c) { return [c.name || '—', c.phone, c.points]; }));
+      table('pt-ledger', ['日期', '客人', '增減', '原因'], data.ledger.map(function (e) {
+        return [day(e.created_at), (e.name || '') + ' ' + e.phone, (e.delta > 0 ? '+' : '') + e.delta, e.reason || ''];
+      }));
+      var options = $('pt-customers');
+      options.textContent = '';
+      customers.forEach(function (c) { var o = document.createElement('option'); o.value = c.phone; o.label = c.name + '（' + c.points + ' 點）'; options.appendChild(o); });
+    });
+  }
+  $('pt-rules').addEventListener('submit', function (e) {
+    e.preventDefault();
+    $('pt-status').textContent = '儲存中…';
+    api('PUT', '/api/admin/settings', { points: { earnPer: $('pt-earn').value, pointValue: $('pt-value').value, classPoints: $('pt-class').value } })
+      .then(function () { $('pt-status').textContent = '已儲存'; document.activeElement.blur(); return loadPoints(); })
+      .catch(function (err) { $('pt-status').textContent = err.message; });
+  });
+  $('pt-adjust').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var phone = $('pt-phone').value.replace(/[^\d+]/g, '');
+    api('POST', '/api/admin/customers/' + encodeURIComponent(phone) + '/points', { delta: Number($('pt-delta').value), reason: $('pt-reason').value })
+      .then(function (res) {
+        $('pt-adjust-status').textContent = '已調整，現有 ' + res.points + ' 點';
+        $('pt-delta').value = ''; $('pt-reason').value = '';
+        loadPoints(); loadCustomers();
+      }).catch(function (err) { $('pt-adjust-status').textContent = err.message; });
   });
 
   // ---- Report ----
