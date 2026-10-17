@@ -23,22 +23,22 @@
 <input id="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="主帳號可留空">
 <label for="token">密碼</label>
 <input id="token" type="password" autocomplete="current-password" required>
-<div id="mfa-setup" hidden>
-<p class="bk-hint">第一次登入要先設定雙重認證：在手機的驗證器 App（例如 Google Authenticator）新增帳戶，選「輸入設定金鑰」，帳戶名稱填「奇怪貓後台」，金鑰填下面這串字，金鑰類型選「時間」。</p>
-<p id="mfa-key" style="margin: 8px 0; font-family: monospace; font-size: 17px; letter-spacing: 1px; word-break: break-all; user-select: all"></p>
-<a id="mfa-link" class="bk-hint">用手機開啟這個頁面時，可按這裡直接加入驗證器</a>
-</div>
 <div id="mfa" hidden style="display: flex; flex-direction: column; gap: 12px">
-<label for="code">驗證碼</label>
-<input id="code" type="text" inputmode="numeric" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" maxlength="11" placeholder="驗證器上的 6 位數字，或一組備用碼">
+<p id="mfa-note" class="bk-hint"></p>
+<button type="button" id="mfa-go" class="bk-submit"></button>
+<a href="#" id="mfa-use-backup" class="bk-hint">裝置不在身邊？改用備用碼</a>
+<div id="mfa-backup" hidden style="display: flex; flex-direction: column; gap: 12px">
+<label for="code">備用碼</label>
+<input id="code" type="text" autocapitalize="characters" spellcheck="false" maxlength="11" placeholder="例如 ABCDE-FGHJK">
 </div>
-<button type="submit" class="bk-submit">登入</button>
+</div>
+<button type="submit" class="bk-submit" id="login-submit">登入</button>
 <p id="login-error" class="bk-error" role="alert" hidden></p>
 </form>
 
 <div id="backup-codes" class="admin-login" hidden>
 <h1 class="h-serif">備用碼</h1>
-<p class="bk-hint">手機遺失或換手機時，每組備用碼可以代替驗證碼登入一次。請抄下或拍照存到安全的地方，這些碼只會顯示這一次。</p>
+<p class="bk-hint">裝置遺失或換新裝置時，每組備用碼可以代替通行金鑰登入一次。請抄下或拍照存到安全的地方，這些碼只會顯示這一次。</p>
 <ol id="backup-list" style="margin: 0; padding-left: 28px; font-family: monospace; font-size: 17px; line-height: 1.8"></ol>
 <button type="button" id="backup-done" class="bk-submit">我已存好，進入後台</button>
 </div>
@@ -263,12 +263,12 @@
 <div class="bk-input"><label for="st-role">權限</label><select id="st-role"><option value="staff">店員（預約、訂單、貨品、客人）</option><option value="owner">店主（全部功能）</option></select></div>
 <div class="bk-input"><label for="st-password">密碼</label><input id="st-password" type="password" autocomplete="new-password" minlength="8" placeholder="至少 8 個字元"></div>
 <label class="admin-check"><input id="st-active" type="checkbox" checked> 可以登入</label>
-<label class="admin-check" id="st-mfa-row" hidden><input id="st-mfa" type="checkbox"> 重設雙重認證（例如換了手機；對方下次登入時重新設定）</label>
+<label class="admin-check" id="st-mfa-row" hidden><input id="st-mfa" type="checkbox"> 重設通行金鑰（例如換了裝置；對方下次登入時重新建立）</label>
 </div>
 <div class="admin-bar" style="margin: 0"><button type="submit" class="chip" aria-pressed="true">儲存</button><button type="button" class="chip" id="st-reset">清空</button><span id="st-status" role="status" style="color: var(--muted)"></span></div>
 </form>
 <div class="admin-table"><table id="st-list"></table></div>
-<p class="bk-hint">店員看不到報表、商店設定、優惠碼、帳號管理與操作紀錄。主帳號（Cloudflare 上的管理密碼）永遠可以登入，用來在忘記密碼時救援。每個帳號都要用密碼加驗證器 App 的驗證碼登入；有人換了手機，按「修改」勾選「重設雙重認證」。</p>
+<p class="bk-hint">店員看不到報表、商店設定、優惠碼、帳號管理與操作紀錄。主帳號（Cloudflare 上的管理密碼）永遠可以登入，用來在忘記密碼時救援。每個帳號都要用密碼加通行金鑰（指紋、臉部辨識或螢幕鎖）登入；有人換了裝置又沒有備用碼，按「修改」勾選「重設通行金鑰」。</p>
 </section>
 
 <section id="tab-audit" hidden>
@@ -468,30 +468,33 @@
     });
   }
 
-  // Two-step sign-in: the server asks for a code, or hands out a key to set one up first.
-  var mfaKey = '';
+  // Two-step sign-in: after the password, the server hands out a challenge for this device's passkey.
+  var step = null; // { passkey: { challenge, ids } } or { register: { challenge, user, name, displayName } }
+  var bytes = function (text) { return Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/')), function (c) { return c.charCodeAt(0); }); };
+  var text64 = function (buf) { return btoa(String.fromCharCode.apply(null, new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
   function resetMfa() {
-    mfaKey = '';
+    step = null;
     $('code').value = '';
     $('mfa').hidden = true;
-    $('mfa-setup').hidden = true;
+    $('mfa-backup').hidden = true;
+    $('login-submit').hidden = false;
   }
   $('username').addEventListener('input', resetMfa);
 
-  $('login').addEventListener('submit', function (e) {
-    e.preventDefault();
+  function signIn(extra) {
     var box = $('login-error');
     box.hidden = true;
     token = '';
-    var body = { username: $('username').value, password: $('token').value, code: $('code').value, secret: mfaKey };
-    api('POST', '/api/admin/login', body).then(function (res) {
+    var body = { username: $('username').value, password: $('token').value };
+    Object.keys(extra).forEach(function (k) { body[k] = extra[k]; });
+    return api('POST', '/api/admin/login', body).then(function (res) {
       // Only the session token is kept, and only until this browser tab is closed.
       token = res.token;
       try { sessionStorage.setItem('ssc-admin', token); } catch (e2) {}
       $('token').value = '';
       resetMfa();
       if (!res.backupCodes) return load();
-      // Backup codes are shown once, right after 2FA is set up.
+      // Backup codes are shown once, right after the first passkey is made.
       var list = $('backup-list');
       list.textContent = '';
       res.backupCodes.forEach(function (c) { var li = document.createElement('li'); li.textContent = c; list.appendChild(li); });
@@ -499,20 +502,66 @@
       $('backup-codes').hidden = false;
     }).catch(function (err) {
       var data = err.data || {};
-      if (data.setup) {
-        mfaKey = data.setup;
-        $('mfa-key').textContent = mfaKey.replace(/(.{4})/g, '$1 ').trim();
-        $('mfa-link').href = 'otpauth://totp/' + encodeURIComponent('奇怪貓後台:' + (body.username || 'admin')) + '?secret=' + mfaKey + '&issuer=' + encodeURIComponent('奇怪貓後台');
-        $('mfa-setup').hidden = false;
-      }
-      if (data.setup || data.needCode) {
+      if (data.passkey || data.register) {
+        step = data;
+        $('mfa-note').textContent = data.register
+          ? '第一次登入：請為這個帳號建立通行金鑰。按下面的按鈕，再用這部裝置的指紋、臉部辨識或螢幕鎖確認。'
+          : '請用這部裝置的指紋、臉部辨識或螢幕鎖確認。';
+        $('mfa-go').textContent = data.register ? '建立通行金鑰' : '用通行金鑰確認';
+        $('mfa-use-backup').hidden = Boolean(data.register);
         $('mfa').hidden = false;
-        $('code').value = '';
-        $('code').focus();
+        $('login-submit').hidden = $('mfa-backup').hidden;
+        $('mfa-go').focus();
+        return;
       }
-      // The first reply only asks for a code; that is not an error to show.
-      if (data.error) { box.textContent = data.error; box.hidden = false; }
-      else if (!data.setup && !data.needCode) { box.textContent = err.message; box.hidden = false; }
+      // A failed passkey needs a new challenge, so start again from the password.
+      if (extra.passkey) resetMfa();
+      box.textContent = err.message;
+      box.hidden = false;
+    });
+  }
+
+  $('login').addEventListener('submit', function (e) {
+    e.preventDefault();
+    signIn($('mfa-backup').hidden ? {} : { code: $('code').value });
+  });
+  $('mfa-use-backup').addEventListener('click', function (e) {
+    e.preventDefault();
+    $('mfa-backup').hidden = false;
+    $('login-submit').hidden = false;
+    $('code').focus();
+  });
+  // The phone or computer asks for a fingerprint, face or PIN; a computer without them offers a QR code for the phone.
+  $('mfa-go').addEventListener('click', function () {
+    var box = $('login-error');
+    box.hidden = true;
+    if (!window.PublicKeyCredential || !step) {
+      box.textContent = '這個瀏覽器不支援通行金鑰，請改用最新版的 Chrome、Safari 或 Edge';
+      box.hidden = false;
+      return;
+    }
+    var r = step.register;
+    var ask = r
+      ? navigator.credentials.create({ publicKey: {
+          challenge: bytes(r.challenge), rp: { name: '奇怪貓後台', id: location.hostname },
+          user: { id: new TextEncoder().encode(r.user), name: r.name, displayName: r.displayName },
+          pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+          authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' }, attestation: 'none', timeout: 120000,
+        } }).then(function (c) {
+          var key = c.response.getPublicKey && c.response.getPublicKey();
+          if (!key) throw new Error('這個瀏覽器版本太舊，請更新後再試');
+          return { id: c.id, publicKey: text64(key), alg: c.response.getPublicKeyAlgorithm(), clientDataJSON: text64(c.response.clientDataJSON) };
+        })
+      : navigator.credentials.get({ publicKey: {
+          challenge: bytes(step.passkey.challenge), rpId: location.hostname, userVerification: 'required', timeout: 120000,
+          allowCredentials: step.passkey.ids.map(function (id) { return { type: 'public-key', id: bytes(id) }; }),
+        } }).then(function (c) {
+          return { id: c.id, clientDataJSON: text64(c.response.clientDataJSON), authenticatorData: text64(c.response.authenticatorData), signature: text64(c.response.signature) };
+        });
+    ask.then(function (passkey) { return signIn({ passkey: passkey }); }, function (err) {
+      // NotAllowedError: the person cancelled, or the prompt timed out.
+      box.textContent = err.name === 'NotAllowedError' ? '已取消或逾時，請再按一次' : (err.message || '無法使用通行金鑰');
+      box.hidden = false;
     });
   });
   $('backup-done').addEventListener('click', function () {

@@ -26,7 +26,7 @@
 //   POST /api/points/balance         { code, phone } -> points the customer can spend
 //   POST /api/promos/check           { code, subtotal } -> what the code takes off
 // Back office sign-in and owner-only pages:
-//   POST /api/admin/login { username, password, code, secret } -> { token } or { setup } / { needCode }; GET /api/admin/me; POST /api/admin/logout
+//   POST /api/admin/login { username, password, passkey | code } -> { token } or a passkey challenge; GET /api/admin/me; POST /api/admin/logout
 //   /api/admin/staff, /api/admin/promos, /api/admin/audit, /api/admin/backup, PUT /api/admin/password
 
 // ---- Settings the studio is likely to change -------------------------------
@@ -310,34 +310,58 @@ async function login(request, env) {
   return [{ token, name: who.name, username: who.username, role: who.role, backupCodes: extra.backupCodes }, 200];
 }
 
-// ---- Two-step sign-in: 6-digit codes from an authenticator app (TOTP, RFC 6238) ----
+// ---- Two-step sign-in: a passkey (WebAuthn) on the person's phone or computer ----
 const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 const randomB32 = (length) => [...crypto.getRandomValues(new Uint8Array(length))].map((b) => B32[b & 31]).join('');
-const MFA_TRIES = 5; // wrong codes allowed per account in one 15-minute block
+const MFA_TRIES = 5; // failed passkey or backup-code tries allowed per account in one 15-minute block
+const b64u = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64u = (text) => Uint8Array.from(atob(String(text).replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+// The two signature types passkeys use (COSE numbers): ES256 almost everywhere, RS256 on some Windows PCs.
+const ALGS = { '-7': { name: 'ECDSA', namedCurve: 'P-256', hash: 'SHA-256' }, '-257': { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' } };
 
-/** The code an authenticator app shows for this base32 secret during 30-second step `step`. */
-async function totp(secret, step) {
-  const bytes = [];
-  let bits = 0, n = 0;
-  for (const c of secret) {
-    n = ((n << 5) | B32.indexOf(c)) & 4095;
-    bits += 5;
-    if (bits >= 8) { bytes.push((n >>> (bits - 8)) & 255); bits -= 8; }
+/** A browser's DER-encoded ECDSA signature as the raw r‖s pair WebCrypto verifies. */
+function derToRaw(der) {
+  const out = new Uint8Array(64);
+  let i = 2;
+  for (const at of [0, 32]) {
+    const len = der[i + 1];
+    const v = der.slice(i + 2 + Math.max(len - 32, 0), i + 2 + len);
+    out.set(v, at + 32 - v.length);
+    i += 2 + len;
   }
-  const key = await crypto.subtle.importKey('raw', new Uint8Array(bytes), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
-  const msg = new DataView(new ArrayBuffer(8));
-  msg.setUint32(4, step);
-  const h = new Uint8Array(await crypto.subtle.sign('HMAC', key, msg));
-  const o = h[19] & 15;
-  return String((((h[o] & 127) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3]) % 1000000).padStart(6, '0');
+  return out;
 }
 
-/** The step a code matches (allowing 30 seconds of clock drift either way), or 0. Steps up to `last` are spent. */
-async function codeStep(secret, code, last) {
-  if (!/^\d{6}$/.test(code)) return 0;
-  const now = Math.floor(Date.now() / 30000);
-  for (const s of [now - 1, now, now + 1]) if (s > last && same(await totp(secret, s), code)) return s;
-  return 0;
+/** The site (rpId) if the browser signed this very challenge on one of the studio's own pages, else null. */
+function signedHere(env, clientDataJSON, type, challenge) {
+  try {
+    const c = JSON.parse(new TextDecoder().decode(unb64u(clientDataJSON)));
+    const allowed = (env.ALLOWED_ORIGINS || '*').split(',').map((s) => s.trim());
+    if (c.type !== type || !challenge || c.challenge !== challenge || !(allowed.includes('*') || allowed.includes(c.origin))) return null;
+    return new URL(c.origin).hostname;
+  } catch (e) { return null; }
+}
+
+/** Whether a passkey sign-in really came from this account's passkey, unlocked by its owner. */
+async function passkeyOk(env, rec, p) {
+  try {
+    const pk = rec.passkeys.find((k) => k.id === p.id);
+    const host = pk && signedHere(env, p.clientDataJSON, 'webauthn.get', rec.challenge);
+    if (!host) return false;
+    const auth = unb64u(p.authenticatorData);
+    // Made for this site, and unlocked with a fingerprint, face or PIN (flags: user present 1 + verified 4).
+    if (hex(auth.slice(0, 32)) !== (await sha256(host)) || (auth[32] & 5) !== 5) return false;
+    const alg = ALGS[pk.alg];
+    const key = await crypto.subtle.importKey('spki', unb64u(pk.key), alg, false, ['verify']);
+    const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', unb64u(p.clientDataJSON)));
+    const sig = unb64u(p.signature);
+    return await crypto.subtle.verify(alg, key, pk.alg === -7 ? derToRaw(sig) : sig, new Uint8Array([...auth, ...hash]));
+  } catch (e) { return false; }
+}
+
+/** Whether a newly made passkey is a public key we can check signatures with. */
+async function keyOk(p) {
+  try { return Boolean(ALGS[p.alg] && (await crypto.subtle.importKey('spki', unb64u(p.publicKey), ALGS[p.alg], false, ['verify']))); } catch (e) { return false; }
 }
 
 /** An account's 2FA record (JSON text): on its staff row, or in settings for the master password. */
@@ -347,7 +371,7 @@ async function readMfa(env, who) {
     : await env.DB.prepare('SELECT mfa FROM staff WHERE id = ?').bind(who.id).first();
   return (row && row.mfa) || null;
 }
-/** Replaces the record only if it is still `before`, so each code and each backup code works once. */
+/** Replaces the record only if it is still `before`, so each challenge and each backup code works once. */
 async function swapMfa(env, who, before, after) {
   const r = who.id !== 0
     ? await env.DB.prepare('UPDATE staff SET mfa = ? WHERE id = ? AND mfa IS ?').bind(after, who.id, before).run()
@@ -359,36 +383,46 @@ async function swapMfa(env, who, before, after) {
 
 /**
  * Runs after a correct password: the reply to send instead of signing in, or null to sign in.
- * An account without 2FA is handed a fresh key, and signed in once a code made from that key comes back.
+ * The first reply is a one-time challenge for the browser's passkey to sign (or to create the first passkey with).
  */
 async function secondStep(env, who, body, extra) {
   const key = 'mfa:' + who.id, win = Math.floor(Date.now() / 900000);
   const fails = await env.DB.prepare('SELECT n FROM rate_limits WHERE key = ? AND win = ?').bind(key, win).first();
-  if (fails && fails.n >= MFA_TRIES) return [{ error: '驗證碼錯誤太多次，請 15 分鐘後再試' }, 429];
-  const code = String(body.code || '').slice(0, 20).replace(/[\s-]/g, '').toUpperCase();
+  if (fails && fails.n >= MFA_TRIES) return [{ error: '驗證失敗太多次，請 15 分鐘後再試' }, 429];
   const before = await readMfa(env, who);
-  const rec = before ? JSON.parse(before) : null;
-  const secret = String(body.secret || '');
+  let rec = before ? JSON.parse(before) : {};
+  // Records from the earlier authenticator-app version hold no passkey, so those accounts set up again.
+  if (!Array.isArray(rec.passkeys)) rec = { challenge: rec.challenge, exp: rec.exp };
+  const has = Array.isArray(rec.passkeys);
+  const p = body.passkey && typeof body.passkey === 'object' ? body.passkey : null;
+  const code = String(body.code || '').slice(0, 20).replace(/[\s-]/g, '').toUpperCase();
+  if (!p && !code) {
+    const challenge = b64u(crypto.getRandomValues(new Uint8Array(32)));
+    if (!(await swapMfa(env, who, before, JSON.stringify({ ...rec, challenge, exp: Date.now() + 300000 })))) return [{ error: '請再按一次登入' }, 409];
+    return has
+      ? [{ passkey: { challenge, ids: rec.passkeys.map((k) => k.id) } }, 401]
+      : [{ register: { challenge, user: 'ssc-' + who.id, name: who.username, displayName: who.name } }, 401];
+  }
+  const fresh = rec.exp > Date.now();
   let next = null;
-  if (!rec) {
-    if (!/^[A-Z2-7]{32}$/.test(secret)) return [{ setup: randomB32(32) }, 401];
-    const step = await codeStep(secret, code, 0);
-    if (step) {
+  if (p && fresh && !has) {
+    // First sign-in: keep the new passkey's public key, and hand out backup codes.
+    if (typeof p.id === 'string' && (await keyOk(p)) && signedHere(env, p.clientDataJSON, 'webauthn.create', rec.challenge)) {
       const codes = Array.from({ length: 10 }, () => randomB32(10));
-      next = { secret, step, backup: await Promise.all(codes.map(sha256)) };
+      next = { passkeys: [{ id: p.id.slice(0, 300), key: String(p.publicKey), alg: Number(p.alg) }], backup: await Promise.all(codes.map(sha256)) };
       extra.backupCodes = codes.map((c) => c.slice(0, 5) + '-' + c.slice(5));
     }
-  } else {
-    if (!code) return [{ needCode: true }, 401];
-    const step = await codeStep(rec.secret, code, rec.step);
-    const hash = step ? '' : await sha256(code);
-    if (step) next = { ...rec, step };
-    else if (rec.backup.includes(hash)) next = { ...rec, backup: rec.backup.filter((h) => h !== hash) };
-    extra.usedBackup = !step;
+  } else if (p && fresh) {
+    if (await passkeyOk(env, rec, p)) next = { passkeys: rec.passkeys, backup: rec.backup };
+  } else if (code && has) {
+    const hash = await sha256(code);
+    if (rec.backup.includes(hash)) next = { passkeys: rec.passkeys, backup: rec.backup.filter((h) => h !== hash) };
+    extra.usedBackup = true;
   }
   if (next && (await swapMfa(env, who, before, JSON.stringify(next)))) return null;
   await env.DB.prepare('INSERT INTO rate_limits (key, win, n) VALUES (?, ?, 1) ON CONFLICT(key, win) DO UPDATE SET n = n + 1').bind(key, win).run();
-  return rec ? [{ error: '驗證碼不正確', needCode: true }, 401] : [{ error: '驗證碼不正確，請確認手機的時間正確後再試', setup: secret }, 401];
+  if (code) return [{ error: '備用碼不正確' }, 401];
+  return [{ error: fresh ? '通行金鑰驗證失敗，請重新登入' : '驗證逾時，請重新登入' }, 401];
 }
 
 // What each change is called in the activity log. Photo uploads are left out (the product save that follows is logged).

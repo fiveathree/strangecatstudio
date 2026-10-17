@@ -4,7 +4,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { createHmac } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import assert from 'node:assert/strict';
 import worker, { CONFIG, slotTimes, taipeiToday } from './worker.js';
 
@@ -38,38 +38,42 @@ async function call(method, path, body, token) {
   return { status: res.status, data: await res.json() };
 }
 
-/** The 6-digit code an authenticator app would show, made with Node's own HMAC to cross-check the Worker. */
-function otp(secret, at = Date.now()) {
-  let bits = '';
-  for (const c of secret) bits += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'.indexOf(c).toString(2).padStart(5, '0');
-  const msg = Buffer.alloc(8);
-  msg.writeUInt32BE(Math.floor(at / 30000), 4);
-  const h = createHmac('sha1', Buffer.from(bits.match(/.{8}/g).map((b) => parseInt(b, 2)))).update(msg).digest();
-  return String((h.readUInt32BE(h[19] & 15) & 0x7fffffff) % 1000000).padStart(6, '0');
+// A stand-in for a phone's passkey, built on Node's own ECDSA (which signs in DER, as browsers do) to cross-check the Worker.
+const SITE = 'https://studio.example';
+const devices = {};
+const b64u = (data) => Buffer.from(data).toString('base64url');
+/** What a browser sends back for a sign-in step: creates a passkey for `who`, or signs the challenge with theirs. */
+async function device(who, step, origin = SITE, flags = 5, rp = new URL(origin).hostname) {
+  const made = !!step.register;
+  const clientData = Buffer.from(JSON.stringify({ type: made ? 'webauthn.create' : 'webauthn.get', challenge: (step.register || step.passkey).challenge, origin }));
+  if (made) {
+    const pair = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    devices[who] = { id: b64u(randomBytes(16)), ...pair };
+    return { id: devices[who].id, publicKey: b64u(pair.publicKey.export({ type: 'spki', format: 'der' })), alg: -7, clientDataJSON: b64u(clientData) };
+  }
+  const d = devices[who];
+  const auth = Buffer.concat([createHash('sha256').update(rp).digest(), Buffer.from([flags, 0, 0, 0, 1])]);
+  const signature = sign('sha256', Buffer.concat([auth, createHash('sha256').update(clientData).digest()]), d.privateKey);
+  return { id: d.id, clientDataJSON: b64u(clientData), authenticatorData: b64u(auth), signature: b64u(signature) };
 }
-const wrong = (c) => String((Number(c) + 1) % 1000000).padStart(6, '0');
 
-// Each code works only once, so every sign-in moves the clock on by one 30-second step.
+// Lets the lockout checks start at the beginning of a 15-minute block.
 const realNow = Date.now;
 let skew = 0;
 Date.now = () => realNow() + skew;
-const keys = {};
-/** Signs in with password and code, setting up 2FA first if the account has none yet. */
+const nextBlock = () => { skew += 900000 - (Date.now() % 900000) + 1000; };
+
+/** Signs in with password and passkey, creating the passkey first if the account has none yet. */
 async function signIn(username, password, ip) {
-  skew += 30000;
   const send = async (extra) => {
     const headers = { 'Content-Type': 'application/json' };
     if (ip) headers['CF-Connecting-IP'] = ip;
     const res = await worker.fetch(new Request('http://local/api/admin/login', { method: 'POST', headers, body: JSON.stringify({ username, password, ...extra }) }), env);
     return { status: res.status, data: await res.json() };
   };
-  const who = username.toLowerCase();
-  let r = await send(keys[who] ? { code: otp(keys[who]) } : {});
-  if (r.data.setup) {
-    keys[who] = r.data.setup;
-    r = await send({ secret: keys[who], code: otp(keys[who]) });
-  }
-  return r;
+  const r = await send({});
+  if (!r.data.passkey && !r.data.register) return r;
+  return send({ passkey: await device(username.toLowerCase(), r.data) });
 }
 
 function nextDate(studio, offset = 2) {
@@ -385,45 +389,57 @@ if (process.argv[2] === 'serve') {
   await call('POST', '/api/admin/logout', null, ownerToken);
   assert.equal((await call('GET', '/api/admin/me', null, ownerToken)).status, 401);
 
-  // ---- Two-step sign-in ----
-  assert.equal(otp('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', 59000), '287082', 'the test helper agrees with RFC 6238');
+  // ---- Two-step sign-in with a passkey ----
+  env.ALLOWED_ORIGINS = SITE; // passkeys made on any other site must be refused
   assert.equal((await call('GET', '/api/admin/orders', null, 'test-token')).status, 401, 'the master password is no longer an API key');
   await call('POST', '/api/admin/staff', { username: 'kai', name: '阿凱', role: 'staff', password: 'kai-password' }, ADMIN);
   const kai = (extra) => call('POST', '/api/admin/login', { username: 'kai', password: 'kai-password', ...extra });
+  nextBlock();
   r = await kai({});
-  assert.ok(r.status === 401 && !r.data.token && /^[A-Z2-7]{32}$/.test(r.data.setup), 'a password alone only starts the set-up');
-  const kaiKey = r.data.setup;
-  r = await kai({ secret: kaiKey, code: wrong(otp(kaiKey)) });
-  assert.ok(r.status === 401 && r.data.setup === kaiKey && !r.data.token, 'a wrong code does not finish the set-up');
-  skew += 30000;
-  r = await kai({ secret: kaiKey, code: otp(kaiKey) });
+  assert.ok(r.status === 401 && !r.data.token && r.data.register.challenge, 'a password alone only starts the set-up');
+  const made = await device('kai', r.data);
+  const madeElsewhere = JSON.parse(Buffer.from(made.clientDataJSON, 'base64url'));
+  assert.equal((await kai({ passkey: { ...made, clientDataJSON: b64u(JSON.stringify({ ...madeElsewhere, challenge: 'old' })) } })).status, 401, 'a passkey made for another challenge is refused');
+  r = await kai({ passkey: made });
   assert.equal(r.status, 200);
   assert.equal(r.data.backupCodes.length, 10);
   const kaiBackup = r.data.backupCodes;
-  assert.equal((await kai({ code: otp(kaiKey) })).status, 401, 'a code works once');
   r = await kai({});
-  assert.ok(r.status === 401 && r.data.needCode && !r.data.token, 'once set up, the password alone is not enough');
-  assert.equal((await kai({ code: wrong(otp(kaiKey)) })).status, 401);
-  assert.equal((await kai({ code: kaiBackup[0].toLowerCase() })).status, 200, 'a backup code stands in for the code');
+  assert.ok(r.status === 401 && !r.data.token && r.data.passkey.ids[0] === made.id, 'once set up, the password alone is not enough');
+  const signed = await device('kai', r.data);
+  assert.equal((await kai({ passkey: signed })).status, 200);
+  assert.equal((await kai({ passkey: signed })).status, 401, 'a signed challenge works once');
+  nextBlock();
+  r = await kai({});
+  assert.equal((await kai({ passkey: await device('kai', r.data, 'https://fake-studio.example') })).status, 401, 'a look-alike site gets nothing');
+  assert.equal((await kai({ passkey: { ...(await device('kai', r.data)), signature: signed.signature } })).status, 401, 'a wrong signature is refused');
+  assert.equal((await kai({ passkey: await device('kai', r.data, SITE, 1) })).status, 401, 'the passkey must be unlocked with a fingerprint, face or PIN');
+  assert.equal((await kai({ passkey: await device('kai', r.data, SITE, 5, 'fake-studio.example') })).status, 401, 'a passkey for another site is refused');
+  assert.equal((await kai({ passkey: await device('kai', r.data) })).status, 200);
+  nextBlock();
+  assert.equal((await kai({ code: kaiBackup[0].toLowerCase() })).status, 200, 'a backup code stands in for the passkey');
   assert.equal((await kai({ code: kaiBackup[0] })).status, 401, 'a backup code works once');
   r = await call('GET', '/api/admin/audit', null, ADMIN);
   assert.equal(r.data.audit.find((a) => a.staff_name === '阿凱').detail, '使用備用碼');
-  // Five wrong codes in one 15-minute block lock the account, right code or not.
-  skew += 900000 - (Date.now() % 900000) + 1000;
-  for (let i = 0; i < 5; i++) assert.equal((await kai({ code: wrong(otp(kaiKey)) })).status, 401);
-  assert.equal((await kai({ code: otp(kaiKey) })).status, 429);
-  skew += 900000;
-  r = await kai({ code: otp(kaiKey) });
+  // Five failures in one 15-minute block lock the account, right passkey or not.
+  nextBlock();
+  r = await kai({});
+  for (let i = 0; i < 5; i++) assert.equal((await kai({ passkey: { ...(await device('kai', r.data)), signature: signed.signature } })).status, 401);
+  assert.equal((await kai({ passkey: await device('kai', r.data) })).status, 429);
+  nextBlock();
+  r = await kai({});
+  r = await kai({ passkey: await device('kai', r.data) });
   assert.equal(r.status, 200, 'the lock lifts after 15 minutes');
   const kaiToken = r.data.token;
-  // The owner resets someone's 2FA (a new phone): signed out, and set up again next time.
+  // The owner resets someone's passkey (a new phone): signed out, and set up again next time.
   const kaiRow = (await call('GET', '/api/admin/staff', null, ADMIN)).data.staff.find((m) => m.username === 'kai');
   assert.ok(!('mfa' in kaiRow), 'the 2FA record is never sent out');
   assert.equal((await call('PUT', `/api/admin/staff/${kaiRow.id}`, { username: 'kai', name: '阿凱', role: 'staff', resetMfa: true }, ADMIN)).status, 200);
   assert.equal((await call('GET', '/api/admin/me', null, kaiToken)).status, 401);
-  assert.ok((await kai({})).data.setup);
+  assert.ok((await kai({})).data.register);
   const backup = JSON.stringify((await call('GET', '/api/admin/backup', null, ADMIN)).data);
-  assert.ok(!backup.includes(keys['']) && !backup.includes('master_mfa'), 'the master 2FA key stays out of backups');
+  assert.ok(!backup.includes('master_mfa') && !backup.includes(devices[''].id), 'the master passkey stays out of backups');
+  env.ALLOWED_ORIGINS = '*';
 
   // ---- Too many attempts from one address ----
   let last;

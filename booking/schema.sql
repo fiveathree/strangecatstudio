@@ -159,7 +159,7 @@ CREATE TABLE IF NOT EXISTS staff (
   hash        TEXT NOT NULL,               -- PBKDF2 of the password; the password itself is never stored
   active      INTEGER NOT NULL DEFAULT 1,
   created_at  TEXT NOT NULL,
-  mfa         TEXT                         -- 2FA: JSON { secret, step, backup (hashes) }; NULL = not set up yet
+  mfa         TEXT                         -- 2FA: JSON { passkeys: [{ id, key, alg }], backup (hashes), challenge, exp }; NULL = not set up yet
 );
 -- Who is signed in. Only a hash of the session token is kept. staff_id 0 = the master password.
 CREATE TABLE IF NOT EXISTS sessions (
