@@ -286,7 +286,7 @@ async function identify(request, env) {
 }
 
 async function login(request, env) {
-  if (await limited(env, request, 'login', 10, 900)) return TOO_MANY;
+  if (await limited(env, request, 'login', 20, 900)) return TOO_MANY;
   const body = await request.json().catch(() => ({}));
   const username = clean(body.username, 30).toLowerCase();
   const password = typeof body.password === 'string' ? body.password : '';

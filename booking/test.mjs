@@ -427,7 +427,8 @@ if (process.argv[2] === 'serve') {
 
   // ---- Too many attempts from one address ----
   let last;
-  for (let i = 0; i < 11; i++) last = await as('POST', '/api/admin/login', { username: 'x', password: 'y' }, null, '203.0.113.9');
+  for (let i = 0; i < 20; i++) assert.equal((await as('POST', '/api/admin/login', { username: 'x', password: 'y' }, null, '203.0.113.9')).status, 401, '20 tries leave room for 2FA sign-ins');
+  last = await as('POST', '/api/admin/login', { username: 'x', password: 'y' }, null, '203.0.113.9');
   assert.equal(last.status, 429);
   assert.equal((await signIn('', 'test-token', '203.0.113.10')).status, 200, 'other visitors are unaffected');
 
