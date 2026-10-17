@@ -4,11 +4,12 @@
 
 /* Noto Sans TC / Noto Serif TC (Google, SIL Open Font License), cut down to
    the characters this site uses. Rebuild with tools/build_fonts.py after
-   changing text. */
-@font-face { font-family: 'Noto Sans TC'; font-weight: 100 500; font-display: swap; src: url('../assets/fonts/sans-regular.woff') format('woff'); }
-@font-face { font-family: 'Noto Sans TC'; font-weight: 600 900; font-display: swap; src: url('../assets/fonts/sans-bold.woff') format('woff'); }
-@font-face { font-family: 'Noto Serif TC'; font-weight: 100 500; font-display: swap; src: url('../assets/fonts/serif-medium.woff') format('woff'); }
-@font-face { font-family: 'Noto Serif TC'; font-weight: 600 900; font-display: swap; src: url('../assets/fonts/serif-bold.woff') format('woff'); }
+   changing text. Named SSC Sans / SSC Serif so Google's full Noto can follow
+   them in each font stack for characters the subset lacks (see sscNoto in shop.js). */
+@font-face { font-family: 'SSC Sans'; font-weight: 100 500; font-display: swap; src: url('../assets/fonts/sans-regular.woff') format('woff'); }
+@font-face { font-family: 'SSC Sans'; font-weight: 600 900; font-display: swap; src: url('../assets/fonts/sans-bold.woff') format('woff'); }
+@font-face { font-family: 'SSC Serif'; font-weight: 100 500; font-display: swap; src: url('../assets/fonts/serif-medium.woff') format('woff'); }
+@font-face { font-family: 'SSC Serif'; font-weight: 600 900; font-display: swap; src: url('../assets/fonts/serif-bold.woff') format('woff'); }
 
 :root {
   --bg: #F6F2EB;
@@ -166,7 +167,7 @@ button { cursor: pointer; }
 /* ---- Shared building blocks for the shop and builder pages ---- */
 .wrap { box-sizing: content-box; max-width: 1280px; margin: 0 auto; padding-left: 5%; padding-right: 5%; }
 .eyebrow { font-size: 13px; letter-spacing: 0.3em; color: var(--accent); }
-.h-serif { font-family: 'Noto Serif TC', serif; font-weight: 500; letter-spacing: 0.06em; }
+.h-serif { font-family: 'SSC Serif', 'Noto Serif TC', serif; font-weight: 500; letter-spacing: 0.06em; }
 .badge {
   display: inline-block;
   padding: 2px 10px;
@@ -197,13 +198,13 @@ button { cursor: pointer; }
 .stone-card img { width: 100%; height: 300px; object-fit: cover; display: block; }
 .stone-card-premium { border-color: var(--accent); }
 .stone-body { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 24px 28px 28px; }
-.stone-name { font-family: 'Noto Serif TC', serif; font-size: 28px; font-weight: 700; }
+.stone-name { font-family: 'SSC Serif', 'Noto Serif TC', serif; font-size: 28px; font-weight: 700; }
 .stone-note { color: var(--soft); }
 .stone-link { color: var(--accent); font-weight: 500; text-decoration: underline; }
 
 .occasion-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0 40px; }
 .occasion { border-top: 1px solid var(--ink); padding: 24px 0; }
-.occasion-title { font-family: 'Noto Serif TC', serif; font-size: 24px; font-weight: 700; margin-bottom: 6px; }
+.occasion-title { font-family: 'SSC Serif', 'Noto Serif TC', serif; font-size: 24px; font-weight: 700; margin-bottom: 6px; }
 .occasion-note { color: var(--soft); }
 
 /* Filter chips and option tiles */
@@ -259,7 +260,7 @@ button { cursor: pointer; }
 .step-tab small { color: var(--muted); font-size: 13px; }
 .step-tab[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); }
 .step-tab[aria-pressed="true"] small { color: inherit; opacity: 0.75; }
-.step-num { font-family: 'Noto Serif TC', serif; font-size: 30px; }
+.step-num { font-family: 'SSC Serif', 'Noto Serif TC', serif; font-size: 30px; }
 .builder { display: flex; flex-wrap: wrap; gap: 48px; align-items: flex-start; }
 .builder-main { flex: 999 1 560px; min-width: 0; }
 .pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; }
@@ -522,7 +523,7 @@ button { cursor: pointer; }
 .cart-check input { width: 20px; height: 20px; flex: 0 0 auto; margin-top: 2px; }
 
 /* ---- Admin: side menu layout ---- */
-.admin-body { margin: 0; background: var(--bg); color: var(--ink); font-family: 'Noto Sans TC', sans-serif; font-size: 15px; line-height: 1.7; }
+.admin-body { margin: 0; background: var(--bg); color: var(--ink); font-family: 'SSC Sans', 'Noto Sans TC', sans-serif; font-size: 15px; line-height: 1.7; }
 .admin-login { max-width: 360px; margin: 12vh auto 0; padding: 36px 28px; display: flex; flex-direction: column; gap: 12px; background: var(--card); border: 1px solid var(--line2); }
 .admin-login img { border-radius: 50%; align-self: center; }
 .admin-login .eyebrow, .admin-login h1 { text-align: center; margin: 0; }
@@ -535,7 +536,7 @@ button { cursor: pointer; }
 .admin-brand { display: flex; align-items: center; gap: 12px; padding: 0 10px 18px; margin-bottom: 8px; border-bottom: 1px solid var(--line); color: var(--ink); text-decoration: none; }
 .admin-brand img { border-radius: 50%; }
 .admin-brand span { display: flex; flex-direction: column; line-height: 1.35; }
-.admin-brand strong { font-family: 'Noto Serif TC', serif; letter-spacing: 0.08em; }
+.admin-brand strong { font-family: 'SSC Serif', 'Noto Serif TC', serif; letter-spacing: 0.08em; }
 .admin-brand small { font-size: 12px; color: var(--muted); letter-spacing: 0.2em; }
 .admin-side nav { display: flex; flex-direction: column; gap: 2px; }
 .admin-nav-group { padding: 16px 12px 4px; font-size: 12px; letter-spacing: 0.2em; color: var(--muted); }
@@ -549,9 +550,9 @@ button { cursor: pointer; }
 .admin-top h1 { margin: 0; font-size: 28px; }
 .admin-top-note { color: var(--muted); font-size: 14px; }
 .admin-menu { display: none; }
-.admin-h2 { margin: 0 0 10px; font-family: 'Noto Serif TC', serif; font-size: 20px; font-weight: 500; letter-spacing: 0.06em; }
+.admin-h2 { margin: 0 0 10px; font-family: 'SSC Serif', 'Noto Serif TC', serif; font-size: 20px; font-weight: 500; letter-spacing: 0.06em; }
 .admin-group { display: flex; align-items: baseline; gap: 12px; margin: 28px 0 0; padding-bottom: 8px; border-bottom: 1px solid var(--line2); }
-.admin-group span { font-family: 'Noto Sans TC', sans-serif; font-size: 13px; color: var(--muted); letter-spacing: 0; }
+.admin-group span { font-family: 'SSC Sans', 'Noto Sans TC', sans-serif; font-size: 13px; color: var(--muted); letter-spacing: 0; }
 .admin-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 28px; margin-top: 32px; }
 .admin-cols-2 { margin-top: 0; }
 .admin-plain { display: flex; flex-direction: column; font-size: 14px; color: var(--soft); }

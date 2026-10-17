@@ -6,8 +6,8 @@
 
 | 檔案 | 內容 |
 | --- | --- |
-| `index.html` | 首頁：開場影片、三種主石入口、宇宙玻璃系列、貓與星球、Bespoke、工藝、課程、工作室 |
-| `shop.html` | 現貨選購：玻璃鑽石、實驗室鑽石、宇宙玻璃，可按主石、類別、供應方式篩選 |
+| `index.html` | 首頁：開場影片、主推區（一張圖＋標題＋按鈕，直接改這頁的 HTML，改完重跑字型）、三種主石入口、宇宙玻璃系列、貓與星球、Bespoke、工藝、課程、工作室 |
+| `shop.html` | 現貨選購：玻璃鑽石、實驗室鑽石、宇宙玻璃，可按主石、類別、供應方式篩選，另有搜尋框（比對名稱、規格、主石、類別） |
 | `build.html` | 自選配搭：選主石 → 選款式 → 完成細節，右側即時顯示配搭摘要 |
 | `series.html` | 宇宙玻璃五個手工系列：各款價格、規格、製作時間、加購項目（依 2026/03 訂購表單） |
 | `product.html` | 商品頁示範（小貓咪純銀戒指），選項會即時更新價格 |
@@ -24,7 +24,7 @@
 - `js/site.js`：中文斷行處理（把每個分句包成不拆開的一段，避免手機上落單字）、Calendly 嵌入、現貨篩選、自選配搭，以及右上角的黑色／淺色切換（選擇會記在瀏覽器的 `localStorage`），以及商品頁的選項與價格。
 - 網站圖示：`favicon.ico`（16／32／48px，放大貓咪本身，小尺寸才看得清）、`assets/favicon-32.png`、`assets/icon-192.png`、`assets/icon-512.png`、`assets/apple-touch-icon.png`，以及 `site.webmanifest`。都是由原本 640px 的 Logo 產生。
 - `assets/`：Logo、產品相片、開場影片（`hero.mp4` 與手機用的 `hero-mobile.mp4`）。
-- `assets/fonts/`：Noto Sans TC／Noto Serif TC（Google，SIL OFL 免費授權），只保留網站用到的字。**改過網站文字後要重跑 `python3 tools/build_fonts.py`**，否則新字會以裝置內建字型顯示。
+- `assets/fonts/`：Noto Sans TC／Noto Serif TC（Google，SIL OFL 免費授權），只保留網站用到的字，在 CSS 內叫 `SSC Sans`／`SSC Serif`，後面排著 Google 的 Noto 作後備。從後台讀入的文字（貨品名稱等）如果有字型檔沒有的字，`js/shop.js` 的 `sscNoto()` 會向 Google Fonts 只要求這些字，瀏覽器真的缺字才下載；平常不會多出任何請求。**改過網站文字後要重跑 `python3 tools/build_fonts.py`**，否則新字會以裝置內建字型顯示。沒有 Python 時，可用 `node tools/font_missing.mjs assets/fonts/sans-regular.woff "新文字"` 先檢查哪些字缺少。
 - 版面樣式目前寫在各頁的 inline `style` 內。
 
 ## 首頁開場影片
@@ -99,7 +99,7 @@
 ## SEO
 
 - 每頁有獨立的標題、描述、canonical 網址與分享預覽（Open Graph）圖片；首頁另有結構化資料（品牌、兩間工作室的地址與營業時間、社群連結），現貨頁會把有標價的貨品以結構化資料列出。
-- `sitemap.xml` 列出所有公開頁面；`admin.html`、`cart.html`、`404.html` 設為不被收錄。
+- `sitemap.xml` 列出所有公開頁面（每件貨品的 `item.html?id=` 頁面由 JavaScript 產生，沒有列入）；`admin.html`、`cart.html`、`404.html` 與示範頁 `product.html` 設為不被收錄。改了頁面內容要一併更新 `lastmod`。
 - 網址目前寫死為 `https://fiveathree.github.io/strangecatstudio/`。**換成自己的網域時**要一併改：各頁 `<head>` 的 canonical／og 網址、`sitemap.xml`、`404.html` 的 `<base>`，以及 `booking/wrangler.toml` 的 `ALLOWED_ORIGINS`。
 - 上線後要做一次：到 Google Search Console 新增資源並提交 `sitemap.xml`；到 Google 商家檔案登記台南、高雄兩間工作室（對「台南 琉璃」這類在地搜尋最有用）。
 

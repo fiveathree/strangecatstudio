@@ -175,24 +175,30 @@
   if (document.querySelector('.step-panel')) refresh();
 
   // Shop: filter chips. One choice per filter; an empty value means "all".
+  // The search box narrows further by words on the card (name, details, stone) or its category's name.
   var grid = document.getElementById('product-grid');
   if (grid) {
+    var search = document.getElementById('shop-search');
     var applyFilters = function () {
       var want = {};
       document.querySelectorAll('.chip[data-filter][aria-pressed="true"]').forEach(function (c) {
         want[c.getAttribute('data-filter')] = c.getAttribute('data-value');
       });
+      var catName = {};
+      document.querySelectorAll('.chip[data-filter="cat"]').forEach(function (c) { catName[c.getAttribute('data-value')] = c.textContent; });
+      var q = search ? search.value.trim().toLowerCase() : '';
       var shown = 0;
       grid.querySelectorAll('.p-card').forEach(function (card) {
         var ok = Object.keys(want).every(function (k) {
           return !want[k] || card.getAttribute('data-' + k) === want[k];
-        });
+        }) && (!q || (card.textContent + ' ' + (catName[card.getAttribute('data-cat')] || '')).toLowerCase().indexOf(q) !== -1);
         card.hidden = !ok;
         if (ok) shown += 1;
       });
       document.getElementById('result-count').textContent = shown;
       document.getElementById('no-result').hidden = shown !== 0;
     };
+    if (search) search.addEventListener('input', applyFilters);
     var setFilter = function (name, value) {
       document.querySelectorAll('.chip[data-filter="' + name + '"]').forEach(function (c) {
         c.setAttribute('aria-pressed', c.getAttribute('data-value') === value ? 'true' : 'false');
@@ -203,6 +209,12 @@
         setFilter(chip.getAttribute('data-filter'), chip.getAttribute('data-value'));
         applyFilters();
       });
+    });
+    // Nothing matched: one button clears the search and every filter.
+    document.getElementById('show-all').addEventListener('click', function () {
+      if (search) search.value = '';
+      ['stone', 'cat', 'supply'].forEach(function (name) { setFilter(name, ''); });
+      applyFilters();
     });
     // The catalogue comes from the studio's back office. The cards written into the
     // page stay as they are if the API cannot be reached.
@@ -274,6 +286,7 @@
         return res.json();
       }).then(function (data) {
         if (!data.products || !data.products.length) return;
+        if (window.sscNoto) window.sscNoto(data);
         // Filter buttons follow the categories the studio keeps in the back office,
         // leaving out any that have nothing to show.
         var chipRow = function (filter, items, allLabel) {

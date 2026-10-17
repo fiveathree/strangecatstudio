@@ -25,13 +25,13 @@
 <link rel="stylesheet" href="css/site.css">
 </head>
 <body>
-<div style="background: var(--bg); color: var(--ink); font-family: 'Noto Sans TC', sans-serif; font-size: 16px; line-height: 1.7">
+<div style="background: var(--bg); color: var(--ink); font-family: 'SSC Sans', 'Noto Sans TC', sans-serif; font-size: 16px; line-height: 1.7">
 
 <header class="site-header" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 32px; padding: 14px 5%; border-bottom: 1px solid var(--line)">
 <a href="index.html" style="display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--ink)">
 <img src="assets/logo.png" alt="" style="width: 54px; height: 54px; border-radius: 50%; object-fit: cover">
 <span style="display: flex; flex-direction: column; line-height: 1.3">
-<span style="font-family: 'Noto Serif TC', serif; font-size: 20px; font-weight: 700; letter-spacing: 0.12em">奇怪貓工作室</span>
+<span style="font-family: 'SSC Serif', 'Noto Serif TC', serif; font-size: 20px; font-weight: 700; letter-spacing: 0.12em">奇怪貓工作室</span>
 <span style="font-size: 11px; letter-spacing: 0.24em; color: var(--muted)">STUDIO STRANGE CAT</span>
 </span>
 </a>
@@ -51,6 +51,10 @@
 <div class="eyebrow">SHOP ・ 現貨選購</div>
 <h1 class="h-serif" style="font-size: 48px; margin: 8px 0 16px">現貨選購</h1>
 <p style="margin: 0; max-width: 640px; color: var(--soft)">玻璃鑽石、實驗室鑽石、水晶鍊與玻璃飾品為現貨供應。<span class="nw">宇宙玻璃為手工逐顆燒製，</span><span class="nw">需時製作。</span></p>
+<div style="position: relative; max-width: 480px; margin-top: 28px">
+<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="position: absolute; left: 18px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>
+<input id="shop-search" type="search" aria-label="搜尋作品" placeholder="例如：貓咪、項鍊、玻璃鑽石" autocomplete="off" style="display: block; width: 100%; box-sizing: border-box; min-height: 48px; padding: 0 18px 0 46px; font-size: 16px; border: 1px solid var(--line2); border-radius: 999px">
+</div>
 <div class="stone-tabs" role="group" aria-label="主石">
 <button type="button" class="chip" data-filter="stone" data-value="" aria-pressed="true">全部主石</button>
 <button type="button" class="chip" data-filter="stone" data-value="glass" aria-pressed="false">玻璃鑽石</button>
@@ -102,7 +106,7 @@
 <a class="p-card" href="visit.html" data-stone="crystal" data-cat="bracelet" data-supply="stock"><span class="ph">[產品相片]</span><span class="p-meta"><span class="badge">現貨</span><span class="p-stone">水晶鍊</span></span><span class="p-name">[其他水晶手鍊]</span><span class="p-note">[水晶種類] ・ [珠徑]</span><span class="p-price">[售價]</span></a>
 <a class="p-card" href="https://myship.7-11.com.tw/general/detail/GM2511108094787" data-stone="glassware" data-cat="other" data-supply="stock"><span class="ph">[產品相片]</span><span class="p-meta"><span class="badge">現貨</span><span class="p-stone">玻璃飾品</span></span><span class="p-name">玻璃豆芽菜</span><span class="p-note">各款 ・ 於 7-11 賣貨便下單</span><span class="p-price">[售價]</span></a>
 </div>
-<p id="no-result" hidden style="color: var(--soft)">沒有符合條件的作品，試試放寬篩選。</p>
+<p id="no-result" hidden style="color: var(--soft)">沒有符合條件的作品，試試放寬篩選。 <button type="button" class="chip" id="show-all">顯示全部作品</button></p>
 </div>
 </section>
 
@@ -110,7 +114,7 @@
 
 <footer style="background: var(--night); color: #C9CDD8; padding: 40px 5%">
 <div style="max-width: 1280px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 16px 40px; align-items: center; justify-content: space-between; font-size: 14px">
-<span style="font-family: 'Noto Serif TC', serif; font-size: 18px; letter-spacing: 0.12em; color: #F6F2EB">奇怪貓工作室</span>
+<span style="font-family: 'SSC Serif', 'Noto Serif TC', serif; font-size: 18px; letter-spacing: 0.12em; color: #F6F2EB">奇怪貓工作室</span>
 <span class="footer-addr"><a href="https://www.google.com/maps/search/?api=1&amp;query=台南市北區長榮路四段40號">台南市北區長榮路四段40號</a><span class="sep"> ・ </span><a href="https://www.google.com/maps/search/?api=1&amp;query=高雄市中華五路939巷24號">高雄市中華五路939巷24號</a></span>
 <span style="display: flex; flex-wrap: wrap; gap: 4px 24px">
 <a href="https://www.instagram.com/studiostrangecat/" style="display: inline-flex; align-items: center; min-height: 44px; color: #F6F2EB; text-decoration: none">Instagram</a>

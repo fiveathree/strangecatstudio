@@ -4,6 +4,18 @@
   var KEY = 'ssc-cart';
   var $ = function (id) { return document.getElementById(id); };
   var money = function (n) { return 'NT$' + Number(n).toLocaleString('en-US'); };
+  // Words typed in the back office (product names and so on) may use characters the bundled font
+  // subset lacks. Google's Noto, the same free typeface, is asked for exactly the characters in this
+  // data; the browser only downloads it when one of them is really missing from the subset.
+  var asked = {};
+  window.sscNoto = function (data) {
+    var chars = (JSON.stringify(data).match(/[⺀-鿿豈-￯]/g) || []).filter(function (c) { return !asked[c] && (asked[c] = true); });
+    if (!chars.length) return;
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&family=Noto+Serif+TC:wght@500;700&display=swap&text=' + encodeURIComponent(chars.slice(0, 500).join(''));
+    document.head.appendChild(link);
+  };
   var STATUS = { pending: '待匯款', reported: '已回報末五碼，待工作室確認', paid: '已收款，準備出貨', shipped: '已出貨／可取貨', done: '已完成', cancelled: '已取消' };
 
   // The cart is { key: quantity }, where key is the product id, plus the chosen options
@@ -270,6 +282,7 @@
 
     var load = function (fresh) {
       return fetch(API + '/api/products' + (fresh ? '?t=' + Date.now() : '')).then(function (res) { return res.json(); }).then(function (data) {
+        window.sscNoto(data);
         products = {};
         data.products.forEach(function (p) { products[p.id] = p; });
         shipping = data.shipping;
@@ -342,6 +355,7 @@
   if (item && API) {
     var wantId = Number((/[?&]id=(\d+)/.exec(window.location.search) || [])[1]);
     fetch(API + '/api/products').then(function (res) { return res.json(); }).then(function (data) {
+      window.sscNoto(data);
       var p = data.products.filter(function (x) { return x.id === wantId; })[0];
       $('item-loading').hidden = true;
       if (!p) { $('item-missing').hidden = false; return; }
@@ -464,6 +478,7 @@
       var code = $('lookup-code').value.trim();
       var phone = $('lookup-phone').value.trim();
       post('/api/orders/lookup', { code: code, phone: phone }).then(function (o) {
+        window.sscNoto(o);
         out.textContent = '';
         var card = el('div', 'bk-done');
         card.appendChild(el('div', 'h-serif bk-done-title', STATUS[o.status] || o.status));

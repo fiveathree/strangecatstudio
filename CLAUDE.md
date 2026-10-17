@@ -58,10 +58,12 @@
    ```
    要看到 `all booking checks passed`。測試用記憶體內的 SQLite 模擬 D1，直接讀 `schema.sql`。新增 API 行為時要在 `test.mjs` 補上對應檢查。
 2. **字型（改過任何公開頁面的中文字就要跑，然後一併 commit）**
+   字型檔在 CSS 叫 `SSC Sans`／`SSC Serif`，後面排 Google 的 `Noto Sans TC`／`Noto Serif TC`。靜態頁不載入 Google Fonts（為了速度）；只有從 API 讀入的文字經 `sscNoto()` 以 `text=` 向 Google 要缺字。新加的 inline `font-family` 要寫成 `'SSC Serif', 'Noto Serif TC', serif`。
    ```
    python3 tools/build_fonts.py
    ```
    需要 Playwright、fonttools 與系統的 Noto CJK 字型。後台 `admin.html` 故意不納入字型子集。
+   使用者的 Windows 電腦沒有 Python，跑不了這一步：先用 `node tools/font_missing.mjs <字型檔> "文字"` 檢查缺字（字級 ≤500 用 sans-regular／serif-medium，≥600 用 bold），缺字就改用已有的字或另找環境產生字型，並向使用者說明。
 3. **JS 語法**：`js/*.js` 與 `admin.html` 內的 script 至少要能被 Node 解析。
 4. **實際操作一次**：用 `node --experimental-sqlite booking/test.mjs serve`（本機 8787 埠的測試 API，使用測試專用的管理密碼，見 `test.mjs`）加一個靜態伺服器，以 Playwright 把正式 API 網址轉到本機，照使用者的路徑點一次，手機與桌面寬度都看。
 5. **上線後**：等一至兩分鐘讓 Worker 重新部署，再確認新的 API 路徑有回應。
