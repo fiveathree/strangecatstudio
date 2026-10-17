@@ -149,7 +149,7 @@ INSERT OR IGNORE INTO categories (kind, slug, name, sort) VALUES
   ('cat', 'ring', '戒指', 10), ('cat', 'necklace', '項鍊', 20), ('cat', 'earrings', '耳環', 30),
   ('cat', 'bracelet', '手鍊', 40), ('cat', 'other', '其他', 50);
 
--- Back-office accounts. The master password (the ADMIN_TOKEN secret) always works as well.
+-- Back-office accounts. The master password (the ADMIN_TOKEN secret) signs in as well; its 2FA record is settings 'master_mfa'.
 CREATE TABLE IF NOT EXISTS staff (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   username    TEXT NOT NULL UNIQUE,
@@ -158,7 +158,8 @@ CREATE TABLE IF NOT EXISTS staff (
   salt        TEXT NOT NULL,
   hash        TEXT NOT NULL,               -- PBKDF2 of the password; the password itself is never stored
   active      INTEGER NOT NULL DEFAULT 1,
-  created_at  TEXT NOT NULL
+  created_at  TEXT NOT NULL,
+  mfa         TEXT                         -- 2FA: JSON { secret, step, backup (hashes) }; NULL = not set up yet
 );
 -- Who is signed in. Only a hash of the session token is kept. staff_id 0 = the master password.
 CREATE TABLE IF NOT EXISTS sessions (

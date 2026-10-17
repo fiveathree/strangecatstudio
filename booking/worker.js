@@ -4,7 +4,7 @@
 //   GET  /api/slots?studio=tn&from=YYYY-MM-DD&days=14   places left per slot
 //   POST /api/bookings                                  make a booking
 //   POST /api/bookings/payment                          report transfer's last five digits
-// Studio only (Authorization: Bearer <ADMIN_TOKEN>):
+// Studio only (Authorization: Bearer <session token from POST /api/admin/login>):
 //   GET   /api/admin/bookings?from=YYYY-MM-DD
 //   PATCH /api/admin/bookings/:id        { status }
 //   POST  /api/admin/closures            { studio, date, reason }
@@ -26,7 +26,7 @@
 //   POST /api/points/balance         { code, phone } -> points the customer can spend
 //   POST /api/promos/check           { code, subtotal } -> what the code takes off
 // Back office sign-in and owner-only pages:
-//   POST /api/admin/login { username, password } -> { token }; GET /api/admin/me; POST /api/admin/logout
+//   POST /api/admin/login { username, password, code, secret } -> { token } or { setup } / { needCode }; GET /api/admin/me; POST /api/admin/logout
 //   /api/admin/staff, /api/admin/promos, /api/admin/audit, /api/admin/backup, PUT /api/admin/password
 
 // ---- Settings the studio is likely to change -------------------------------
@@ -272,11 +272,10 @@ function same(a, b) {
 const SESSION_HOURS = 12;
 const MASTER = { id: 0, name: '主帳號', username: 'admin', role: 'owner' };
 
-/** Who is asking: the master password, a signed-in member of staff, or nobody. */
+/** Who is asking: whoever signed in (password and 2FA code) and got this session token, or nobody. */
 async function identify(request, env) {
   const token = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
   if (!token) return null;
-  if (env.ADMIN_TOKEN && same(token, env.ADMIN_TOKEN)) return MASTER;
   const row = await env.DB.prepare(
     `SELECT s.staff_id, st.name, st.username, st.role, st.active FROM sessions s LEFT JOIN staff st ON st.id = s.staff_id
      WHERE s.token_hash = ? AND s.expires_at > ?`
@@ -299,13 +298,97 @@ async function login(request, env) {
     if (row && same(await hashPassword(password, row.salt), row.hash)) who = { id: row.id, name: row.name, username: row.username, role: row.role };
   }
   if (!who) return [{ error: '帳號或密碼不正確' }, 401];
+  const extra = {};
+  const refused = await secondStep(env, who, body, extra);
+  if (refused) return refused;
   const token = hex(crypto.getRandomValues(new Uint8Array(32)));
   const now = Date.now();
   await env.DB.prepare('DELETE FROM sessions WHERE expires_at < ?').bind(new Date(now).toISOString()).run();
   await env.DB.prepare('INSERT INTO sessions (token_hash, staff_id, expires_at) VALUES (?, ?, ?)')
     .bind(await sha256(token), who.id, new Date(now + SESSION_HOURS * 3600000).toISOString()).run();
-  await env.DB.prepare('INSERT INTO audit (staff_id, staff_name, action, detail, created_at) VALUES (?, ?, ?, ?, ?)').bind(who.id, who.name, '登入', '', new Date(now).toISOString()).run();
-  return [{ token, name: who.name, username: who.username, role: who.role }, 200];
+  await env.DB.prepare('INSERT INTO audit (staff_id, staff_name, action, detail, created_at) VALUES (?, ?, ?, ?, ?)').bind(who.id, who.name, '登入', extra.usedBackup ? '使用備用碼' : '', new Date(now).toISOString()).run();
+  return [{ token, name: who.name, username: who.username, role: who.role, backupCodes: extra.backupCodes }, 200];
+}
+
+// ---- Two-step sign-in: 6-digit codes from an authenticator app (TOTP, RFC 6238) ----
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+const randomB32 = (length) => [...crypto.getRandomValues(new Uint8Array(length))].map((b) => B32[b & 31]).join('');
+const MFA_TRIES = 5; // wrong codes allowed per account in one 15-minute block
+
+/** The code an authenticator app shows for this base32 secret during 30-second step `step`. */
+async function totp(secret, step) {
+  const bytes = [];
+  let bits = 0, n = 0;
+  for (const c of secret) {
+    n = ((n << 5) | B32.indexOf(c)) & 4095;
+    bits += 5;
+    if (bits >= 8) { bytes.push((n >>> (bits - 8)) & 255); bits -= 8; }
+  }
+  const key = await crypto.subtle.importKey('raw', new Uint8Array(bytes), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+  const msg = new DataView(new ArrayBuffer(8));
+  msg.setUint32(4, step);
+  const h = new Uint8Array(await crypto.subtle.sign('HMAC', key, msg));
+  const o = h[19] & 15;
+  return String((((h[o] & 127) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3]) % 1000000).padStart(6, '0');
+}
+
+/** The step a code matches (allowing 30 seconds of clock drift either way), or 0. Steps up to `last` are spent. */
+async function codeStep(secret, code, last) {
+  if (!/^\d{6}$/.test(code)) return 0;
+  const now = Math.floor(Date.now() / 30000);
+  for (const s of [now - 1, now, now + 1]) if (s > last && same(await totp(secret, s), code)) return s;
+  return 0;
+}
+
+/** An account's 2FA record (JSON text): on its staff row, or in settings for the master password. */
+async function readMfa(env, who) {
+  const row = who.id === 0
+    ? await env.DB.prepare("SELECT value AS mfa FROM settings WHERE key = 'master_mfa'").first()
+    : await env.DB.prepare('SELECT mfa FROM staff WHERE id = ?').bind(who.id).first();
+  return (row && row.mfa) || null;
+}
+/** Replaces the record only if it is still `before`, so each code and each backup code works once. */
+async function swapMfa(env, who, before, after) {
+  const r = who.id !== 0
+    ? await env.DB.prepare('UPDATE staff SET mfa = ? WHERE id = ? AND mfa IS ?').bind(after, who.id, before).run()
+    : before === null
+      ? await env.DB.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('master_mfa', ?)").bind(after).run()
+      : await env.DB.prepare("UPDATE settings SET value = ? WHERE key = 'master_mfa' AND value = ?").bind(after, before).run();
+  return r.meta.changes === 1;
+}
+
+/**
+ * Runs after a correct password: the reply to send instead of signing in, or null to sign in.
+ * An account without 2FA is handed a fresh key, and signed in once a code made from that key comes back.
+ */
+async function secondStep(env, who, body, extra) {
+  const key = 'mfa:' + who.id, win = Math.floor(Date.now() / 900000);
+  const fails = await env.DB.prepare('SELECT n FROM rate_limits WHERE key = ? AND win = ?').bind(key, win).first();
+  if (fails && fails.n >= MFA_TRIES) return [{ error: '驗證碼錯誤太多次，請 15 分鐘後再試' }, 429];
+  const code = String(body.code || '').slice(0, 20).replace(/[\s-]/g, '').toUpperCase();
+  const before = await readMfa(env, who);
+  const rec = before ? JSON.parse(before) : null;
+  const secret = String(body.secret || '');
+  let next = null;
+  if (!rec) {
+    if (!/^[A-Z2-7]{32}$/.test(secret)) return [{ setup: randomB32(32) }, 401];
+    const step = await codeStep(secret, code, 0);
+    if (step) {
+      const codes = Array.from({ length: 10 }, () => randomB32(10));
+      next = { secret, step, backup: await Promise.all(codes.map(sha256)) };
+      extra.backupCodes = codes.map((c) => c.slice(0, 5) + '-' + c.slice(5));
+    }
+  } else {
+    if (!code) return [{ needCode: true }, 401];
+    const step = await codeStep(rec.secret, code, rec.step);
+    const hash = step ? '' : await sha256(code);
+    if (step) next = { ...rec, step };
+    else if (rec.backup.includes(hash)) next = { ...rec, backup: rec.backup.filter((h) => h !== hash) };
+    extra.usedBackup = !step;
+  }
+  if (next && (await swapMfa(env, who, before, JSON.stringify(next)))) return null;
+  await env.DB.prepare('INSERT INTO rate_limits (key, win, n) VALUES (?, ?, 1) ON CONFLICT(key, win) DO UPDATE SET n = n + 1').bind(key, win).run();
+  return rec ? [{ error: '驗證碼不正確', needCode: true }, 401] : [{ error: '驗證碼不正確，請確認手機的時間正確後再試', setup: secret }, 401];
 }
 
 // What each change is called in the activity log. Photo uploads are left out (the product save that follows is logged).
@@ -894,7 +977,7 @@ function staffIn(body, needPassword) {
   if (!['owner', 'staff'].includes(body.role)) return [null, '請選擇權限'];
   const password = typeof body.password === 'string' ? body.password : '';
   if ((needPassword || password) && password.length < 8) return [null, '密碼至少 8 個字元'];
-  return [{ name, username, role: body.role, password, active: body.active === false ? 0 : 1 }];
+  return [{ name, username, role: body.role, password, active: body.active === false ? 0 : 1, resetMfa: body.resetMfa === true }];
 }
 
 async function adminRoutes(request, url, env, ctx, who) {
@@ -943,8 +1026,9 @@ async function adminRoutes(request, url, env, ctx, who) {
       const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
       await env.DB.prepare('UPDATE staff SET salt = ?, hash = ? WHERE id = ?').bind(salt, await hashPassword(f.password, salt), id).run();
     }
-    // A changed password or a switched-off account signs that person out everywhere.
-    if (f.password || !f.active) await env.DB.prepare('DELETE FROM sessions WHERE staff_id = ?').bind(id).run();
+    if (f.resetMfa) await env.DB.prepare('UPDATE staff SET mfa = NULL WHERE id = ?').bind(id).run();
+    // A changed password, a 2FA reset or a switched-off account signs that person out everywhere.
+    if (f.password || f.resetMfa || !f.active) await env.DB.prepare('DELETE FROM sessions WHERE staff_id = ?').bind(id).run();
     return [{ ok: true }, 200];
   }
   if (staffMatch && staffMatch[1] && request.method === 'DELETE') {
@@ -965,7 +1049,8 @@ async function adminRoutes(request, url, env, ctx, who) {
   if (path === '/api/admin/backup' && request.method === 'GET') {
     const tables = {};
     for (const t of ['bookings', 'closures', 'settings', 'categories', 'products', 'orders', 'order_items', 'customers', 'points', 'promos']) {
-      tables[t] = (await env.DB.prepare(`SELECT * FROM ${t}`).all()).results;
+      // The master password's 2FA key is kept in settings and must never leave the database.
+      tables[t] = (await env.DB.prepare(`SELECT * FROM ${t}` + (t === 'settings' ? " WHERE key != 'master_mfa'" : '')).all()).results;
     }
     return [{ exported_at: new Date().toISOString(), note: '不包含貨品相片、後台帳號與登入紀錄', tables }, 200];
   }

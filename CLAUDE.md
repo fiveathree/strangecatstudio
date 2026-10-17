@@ -45,7 +45,7 @@
 - **Worker**：Cloudflare Workers Builds 已連接這個 repo（根目錄 `/booking`），**每次 push 到 `main` 都會自動重新部署 Worker**。沒有 staging，push 就是上線。
 - **資料庫結構不會自動更新。** 改了 `schema.sql` 之後，必須**在 push 之前**先在正式的 D1 上執行對應的 `CREATE TABLE`／`ALTER TABLE`，否則新版 Worker 會查不到欄位而出錯。資料庫名稱與 ID 在 `booking/wrangler.toml`。`schema.sql` 要同時保持「全新建立也能用」。
 - **GAS 不會自動更新。** 改了 `notify.gs` 要請使用者把新內容貼進 Apps Script，並用「管理部署 → 編輯 → 新版本」更新（這樣網址不變）。
-- **Secrets** 由使用者自己在 Cloudflare 後台設定，名稱是 `ADMIN_TOKEN`（後台主帳號密碼）與 `NOTIFY_URL`（GAS 網址）。助理不經手這些值。
+- **Secrets** 由使用者自己在 Cloudflare 後台設定，名稱是 `ADMIN_TOKEN`（後台主帳號密碼）與 `NOTIFY_URL`（GAS 網址）。助理不經手這些值。`ADMIN_TOKEN` 只能經登入（加雙重認證）使用，不能再直接放在 `Authorization` 呼叫 API。
 - 公開網址目前寫死為 GitHub Pages 的網址。換網域時要改的地方列在 README 的 SEO 一節。
 
 每次 push 前：`git pull --rebase`。commit 訊息結尾加上當次對話系統指定的署名行。
@@ -79,6 +79,7 @@
 - 公開的下單、預約、查詢、登入都有每個 IP 的次數限制；新增公開的寫入 API 時要一併加上。
 - 匯出 CSV 時，開頭是 `= + - @` 的儲存格要加上單引號，避免被試算表當成公式。
 - 備份檔不包含相片、後台帳號與 session。
+- 雙重認證：個人帳號的紀錄在 `staff.mfa`，主帳號的在 `settings` 的 `master_mfa`（備份匯出時已排除）。這兩處永遠不可出現在 API 回應、備份、CSV、操作紀錄。測試用 `test.mjs` 的 `signIn()` 自動完成設定；本機手動試時用 Node 的 HMAC 按畫面上的金鑰計驗證碼。
 - 使用者的電腦可能連接了與這個專案無關的私人資料夾；除非使用者明確要求，不要讀取或列出。
 
 ## 6. 未完成與要等別人的事

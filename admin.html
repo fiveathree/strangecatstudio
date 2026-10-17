@@ -23,9 +23,25 @@
 <input id="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="主帳號可留空">
 <label for="token">密碼</label>
 <input id="token" type="password" autocomplete="current-password" required>
+<div id="mfa-setup" hidden>
+<p class="bk-hint">第一次登入要先設定雙重認證：在手機的驗證器 App（例如 Google Authenticator）新增帳戶，選「輸入設定金鑰」，帳戶名稱填「奇怪貓後台」，金鑰填下面這串字，金鑰類型選「時間」。</p>
+<p id="mfa-key" style="margin: 8px 0; font-family: monospace; font-size: 17px; letter-spacing: 1px; word-break: break-all; user-select: all"></p>
+<a id="mfa-link" class="bk-hint">用手機開啟這個頁面時，可按這裡直接加入驗證器</a>
+</div>
+<div id="mfa" hidden style="display: flex; flex-direction: column; gap: 12px">
+<label for="code">驗證碼</label>
+<input id="code" type="text" inputmode="numeric" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" maxlength="11" placeholder="驗證器上的 6 位數字，或一組備用碼">
+</div>
 <button type="submit" class="bk-submit">登入</button>
 <p id="login-error" class="bk-error" role="alert" hidden></p>
 </form>
+
+<div id="backup-codes" class="admin-login" hidden>
+<h1 class="h-serif">備用碼</h1>
+<p class="bk-hint">手機遺失或換手機時，每組備用碼可以代替驗證碼登入一次。請抄下或拍照存到安全的地方，這些碼只會顯示這一次。</p>
+<ol id="backup-list" style="margin: 0; padding-left: 28px; font-family: monospace; font-size: 17px; line-height: 1.8"></ol>
+<button type="button" id="backup-done" class="bk-submit">我已存好，進入後台</button>
+</div>
 
 <div id="panel" class="admin-shell" hidden>
 <aside class="admin-side" id="side">
@@ -247,11 +263,12 @@
 <div class="bk-input"><label for="st-role">權限</label><select id="st-role"><option value="staff">店員（預約、訂單、貨品、客人）</option><option value="owner">店主（全部功能）</option></select></div>
 <div class="bk-input"><label for="st-password">密碼</label><input id="st-password" type="password" autocomplete="new-password" minlength="8" placeholder="至少 8 個字元"></div>
 <label class="admin-check"><input id="st-active" type="checkbox" checked> 可以登入</label>
+<label class="admin-check" id="st-mfa-row" hidden><input id="st-mfa" type="checkbox"> 重設雙重認證（例如換了手機；對方下次登入時重新設定）</label>
 </div>
 <div class="admin-bar" style="margin: 0"><button type="submit" class="chip" aria-pressed="true">儲存</button><button type="button" class="chip" id="st-reset">清空</button><span id="st-status" role="status" style="color: var(--muted)"></span></div>
 </form>
 <div class="admin-table"><table id="st-list"></table></div>
-<p class="bk-hint">店員看不到報表、商店設定、優惠碼、帳號管理與操作紀錄。主帳號（Cloudflare 上的管理密碼）永遠可以登入，用來在忘記密碼時救援。</p>
+<p class="bk-hint">店員看不到報表、商店設定、優惠碼、帳號管理與操作紀錄。主帳號（Cloudflare 上的管理密碼）永遠可以登入，用來在忘記密碼時救援。每個帳號都要用密碼加驗證器 App 的驗證碼登入；有人換了手機，按「修改」勾選「重設雙重認證」。</p>
 </section>
 
 <section id="tab-audit" hidden>
@@ -322,7 +339,7 @@
       return res.json().then(function (data) {
         // Signed out elsewhere, or the session ran out: back to the sign-in page.
         if (res.status === 401 && path !== '/api/admin/login' && !$('panel').hidden) signedOut('登入已過期，請重新登入');
-        if (!res.ok) { var err = new Error(data.error || '發生錯誤'); err.status = res.status; throw err; }
+        if (!res.ok) { var err = new Error(data.error || '發生錯誤'); err.status = res.status; err.data = data; throw err; }
         return data;
       });
     });
@@ -415,8 +432,10 @@
     me = null;
     try { sessionStorage.removeItem('ssc-admin'); } catch (e) {}
     $('panel').hidden = true;
+    $('backup-codes').hidden = true;
     $('login').hidden = false;
     $('token').value = '';
+    resetMfa();
     var box = $('login-error');
     box.textContent = message || '';
     box.hidden = !message;
@@ -449,21 +468,57 @@
     });
   }
 
+  // Two-step sign-in: the server asks for a code, or hands out a key to set one up first.
+  var mfaKey = '';
+  function resetMfa() {
+    mfaKey = '';
+    $('code').value = '';
+    $('mfa').hidden = true;
+    $('mfa-setup').hidden = true;
+  }
+  $('username').addEventListener('input', resetMfa);
+
   $('login').addEventListener('submit', function (e) {
     e.preventDefault();
     var box = $('login-error');
     box.hidden = true;
     token = '';
-    api('POST', '/api/admin/login', { username: $('username').value, password: $('token').value }).then(function (res) {
+    var body = { username: $('username').value, password: $('token').value, code: $('code').value, secret: mfaKey };
+    api('POST', '/api/admin/login', body).then(function (res) {
       // Only the session token is kept, and only until this browser tab is closed.
       token = res.token;
       try { sessionStorage.setItem('ssc-admin', token); } catch (e2) {}
       $('token').value = '';
-      return load();
+      resetMfa();
+      if (!res.backupCodes) return load();
+      // Backup codes are shown once, right after 2FA is set up.
+      var list = $('backup-list');
+      list.textContent = '';
+      res.backupCodes.forEach(function (c) { var li = document.createElement('li'); li.textContent = c; list.appendChild(li); });
+      $('login').hidden = true;
+      $('backup-codes').hidden = false;
     }).catch(function (err) {
-      box.textContent = err.message;
-      box.hidden = false;
+      var data = err.data || {};
+      if (data.setup) {
+        mfaKey = data.setup;
+        $('mfa-key').textContent = mfaKey.replace(/(.{4})/g, '$1 ').trim();
+        $('mfa-link').href = 'otpauth://totp/' + encodeURIComponent('奇怪貓後台:' + (body.username || 'admin')) + '?secret=' + mfaKey + '&issuer=' + encodeURIComponent('奇怪貓後台');
+        $('mfa-setup').hidden = false;
+      }
+      if (data.setup || data.needCode) {
+        $('mfa').hidden = false;
+        $('code').value = '';
+        $('code').focus();
+      }
+      // The first reply only asks for a code; that is not an error to show.
+      if (data.error) { box.textContent = data.error; box.hidden = false; }
+      else if (!data.setup && !data.needCode) { box.textContent = err.message; box.hidden = false; }
     });
+  });
+  $('backup-done').addEventListener('click', function () {
+    $('backup-list').textContent = '';
+    $('backup-codes').hidden = true;
+    load();
   });
   $('reload').addEventListener('click', load);
   $('logout').addEventListener('click', function () {
@@ -1413,6 +1468,8 @@
     $('st-password').required = !m;
     $('st-password').placeholder = m ? '留空＝不更改密碼' : '至少 8 個字元';
     $('st-active').checked = m ? Boolean(m.active) : true;
+    $('st-mfa').checked = false;
+    $('st-mfa-row').hidden = !m;
     $('st-status').textContent = '';
   }
   function loadStaff() {
@@ -1428,7 +1485,7 @@
   $('st-reset').addEventListener('click', function () { staffForm(null); });
   $('st-form').addEventListener('submit', function (e) {
     e.preventDefault();
-    var body = { name: $('st-name').value, username: $('st-username').value, role: $('st-role').value, password: $('st-password').value, active: $('st-active').checked };
+    var body = { name: $('st-name').value, username: $('st-username').value, role: $('st-role').value, password: $('st-password').value, active: $('st-active').checked, resetMfa: $('st-mfa').checked };
     (staffEditing ? api('PUT', '/api/admin/staff/' + staffEditing.id, body) : api('POST', '/api/admin/staff', body)).then(function () {
       staffForm(null);
       $('st-status').textContent = '已儲存';

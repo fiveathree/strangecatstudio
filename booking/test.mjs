@@ -4,6 +4,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { createHmac } from 'node:crypto';
 import assert from 'node:assert/strict';
 import worker, { CONFIG, slotTimes, taipeiToday } from './worker.js';
 
@@ -37,6 +38,40 @@ async function call(method, path, body, token) {
   return { status: res.status, data: await res.json() };
 }
 
+/** The 6-digit code an authenticator app would show, made with Node's own HMAC to cross-check the Worker. */
+function otp(secret, at = Date.now()) {
+  let bits = '';
+  for (const c of secret) bits += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'.indexOf(c).toString(2).padStart(5, '0');
+  const msg = Buffer.alloc(8);
+  msg.writeUInt32BE(Math.floor(at / 30000), 4);
+  const h = createHmac('sha1', Buffer.from(bits.match(/.{8}/g).map((b) => parseInt(b, 2)))).update(msg).digest();
+  return String((h.readUInt32BE(h[19] & 15) & 0x7fffffff) % 1000000).padStart(6, '0');
+}
+const wrong = (c) => String((Number(c) + 1) % 1000000).padStart(6, '0');
+
+// Each code works only once, so every sign-in moves the clock on by one 30-second step.
+const realNow = Date.now;
+let skew = 0;
+Date.now = () => realNow() + skew;
+const keys = {};
+/** Signs in with password and code, setting up 2FA first if the account has none yet. */
+async function signIn(username, password, ip) {
+  skew += 30000;
+  const send = async (extra) => {
+    const headers = { 'Content-Type': 'application/json' };
+    if (ip) headers['CF-Connecting-IP'] = ip;
+    const res = await worker.fetch(new Request('http://local/api/admin/login', { method: 'POST', headers, body: JSON.stringify({ username, password, ...extra }) }), env);
+    return { status: res.status, data: await res.json() };
+  };
+  const who = username.toLowerCase();
+  let r = await send(keys[who] ? { code: otp(keys[who]) } : {});
+  if (r.data.setup) {
+    keys[who] = r.data.setup;
+    r = await send({ secret: keys[who], code: otp(keys[who]) });
+  }
+  return r;
+}
+
 function nextDate(studio, offset = 2) {
   const d = new Date(taipeiToday() + 'T00:00:00Z');
   d.setUTCDate(d.getUTCDate() + offset);
@@ -54,8 +89,10 @@ if (process.argv[2] === 'serve') {
     const out = await worker.fetch(request, env);
     res.writeHead(out.status, Object.fromEntries(out.headers));
     res.end(Buffer.from(await out.arrayBuffer()));
-  }).listen(8787, () => console.log('booking API on http://localhost:8787 (admin token: test-token)'));
+  }).listen(8787, () => console.log('booking API on http://localhost:8787 (master password: test-token, then set up 2FA)'));
 } else {
+  const ADMIN = (await signIn('', 'test-token')).data.token;
+  assert.ok(ADMIN, 'the master password signs in with 2FA');
   assert.deepEqual(slotTimes('tn'), ['13:30', '15:00', '16:30', '18:00', '19:30']);
   assert.deepEqual(slotTimes('kh'), ['13:30', '15:00', '16:30', '18:00']);
 
@@ -97,17 +134,17 @@ if (process.argv[2] === 'serve') {
 
   // Admin.
   assert.equal((await call('GET', '/api/admin/bookings')).status, 401);
-  r = await call('GET', '/api/admin/bookings', null, 'test-token');
+  r = await call('GET', '/api/admin/bookings', null, ADMIN);
   assert.equal(r.data.bookings.length, 2);
   const first = r.data.bookings.find((b) => b.code === code);
   assert.equal(first.status, 'reported');
   assert.equal(first.pay_last5, '12345');
-  assert.equal((await call('PATCH', `/api/admin/bookings/${first.id}`, { status: 'cancelled' }, 'test-token')).status, 200);
+  assert.equal((await call('PATCH', `/api/admin/bookings/${first.id}`, { status: 'cancelled' }, ADMIN)).status, 200);
   r = await call('GET', `/api/slots?studio=tn&from=${tn}&days=1`);
   assert.equal(r.data.days[0].slots.find((s) => s.time === '15:00').left, 2, 'cancelling frees the places');
 
   // Closing a day.
-  assert.equal((await call('POST', '/api/admin/closures', { studio: 'tn', date: tn, reason: '國定假日' }, 'test-token')).status, 200);
+  assert.equal((await call('POST', '/api/admin/closures', { studio: 'tn', date: tn, reason: '國定假日' }, ADMIN)).status, 200);
   r = await call('GET', `/api/slots?studio=tn&from=${tn}&days=1`);
   assert.equal(r.data.days[0].closed, '國定假日');
   assert.equal((await call('POST', '/api/bookings', { ...person, time: '18:00' })).status, 400);
@@ -125,67 +162,67 @@ if (process.argv[2] === 'serve') {
   assert.equal((await call('POST', '/api/bookings', { ...person, date: tnOnly, time: '13:30' })).status, 201);
   assert.equal((await call('POST', '/api/bookings', { ...guest, date: tnOnly })).status, 409, 'and Kaohsiung once Tainan is booked');
   // Cancelling the Kaohsiung booking reopens Tainan.
-  r = await call('GET', '/api/admin/bookings', null, 'test-token');
+  r = await call('GET', '/api/admin/bookings', null, ADMIN);
   const khBooking = r.data.bookings.find((b) => b.studio === 'kh');
-  await call('PATCH', `/api/admin/bookings/${khBooking.id}`, { status: 'cancelled' }, 'test-token');
+  await call('PATCH', `/api/admin/bookings/${khBooking.id}`, { status: 'cancelled' }, ADMIN);
   r = await call('GET', `/api/slots?studio=tn&from=${kh}&days=1`);
   assert.equal(r.data.days[0].closed, null);
 
   // Notification recipients.
   assert.equal((await call('PUT', '/api/admin/settings', { notify_emails: 'a@b.co' })).status, 401);
-  assert.equal((await call('PUT', '/api/admin/settings', { notify_emails: 'not-an-email' }, 'test-token')).status, 400);
-  r = await call('PUT', '/api/admin/settings', { notify_emails: 'boss@example.com， staff@example.com' }, 'test-token');
+  assert.equal((await call('PUT', '/api/admin/settings', { notify_emails: 'not-an-email' }, ADMIN)).status, 400);
+  r = await call('PUT', '/api/admin/settings', { notify_emails: 'boss@example.com， staff@example.com' }, ADMIN);
   assert.equal(r.data.notify_emails, 'boss@example.com,staff@example.com');
-  r = await call('GET', '/api/admin/bookings', null, 'test-token');
+  r = await call('GET', '/api/admin/bookings', null, ADMIN);
   assert.equal(r.data.settings.notify_emails, 'boss@example.com,staff@example.com');
 
   // ---- Shop catalogue ----
   const item = { name: '玻璃鑽石戒指', stone: 'glass', cat: 'ring', supply: 'stock', note: '6–7mm', price: 2980, priceFrom: false, stock: 2, status: 'active', sort: 1, link: '' };
   assert.equal((await call('POST', '/api/admin/products', item)).status, 401);
-  assert.equal((await call('POST', '/api/admin/products', { ...item, stone: 'gold' }, 'test-token')).status, 400);
-  assert.equal((await call('POST', '/api/admin/products', { ...item, link: 'javascript:alert(1)' }, 'test-token')).status, 400);
-  r = await call('POST', '/api/admin/products', item, 'test-token');
+  assert.equal((await call('POST', '/api/admin/products', { ...item, stone: 'gold' }, ADMIN)).status, 400);
+  assert.equal((await call('POST', '/api/admin/products', { ...item, link: 'javascript:alert(1)' }, ADMIN)).status, 400);
+  r = await call('POST', '/api/admin/products', item, ADMIN);
   assert.equal(r.status, 201);
   const pid = r.data.product.id;
-  await call('POST', '/api/admin/products', { ...item, name: '隱藏款', status: 'hidden' }, 'test-token');
+  await call('POST', '/api/admin/products', { ...item, name: '隱藏款', status: 'hidden' }, ADMIN);
   r = await call('GET', '/api/products');
   assert.deepEqual(r.data.products.map((p) => p.name), ['玻璃鑽石戒指'], 'hidden products stay out of the shop');
-  assert.equal((await call('GET', '/api/admin/products', null, 'test-token')).data.products.length, 2);
+  assert.equal((await call('GET', '/api/admin/products', null, ADMIN)).data.products.length, 2);
 
   // A photo upload, then attach it; a later save without a new photo keeps it.
-  const photo = await worker.fetch(new Request('http://local/api/admin/images', { method: 'POST', headers: { 'Content-Type': 'image/jpeg', Authorization: 'Bearer test-token' }, body: new Uint8Array([255, 216, 255, 1, 2, 3]) }), env);
+  const photo = await worker.fetch(new Request('http://local/api/admin/images', { method: 'POST', headers: { 'Content-Type': 'image/jpeg', Authorization: 'Bearer ' + ADMIN }, body: new Uint8Array([255, 216, 255, 1, 2, 3]) }), env);
   assert.equal(photo.status, 201);
   const photoId = (await photo.json()).id;
-  r = await call('PUT', `/api/admin/products/${pid}`, { ...item, imageId: photoId }, 'test-token');
+  r = await call('PUT', `/api/admin/products/${pid}`, { ...item, imageId: photoId }, ADMIN);
   assert.match(r.data.product.image, /\/api\/images\/\d+$/);
-  r = await call('PUT', `/api/admin/products/${pid}`, { ...item, stock: 0 }, 'test-token');
+  r = await call('PUT', `/api/admin/products/${pid}`, { ...item, stock: 0 }, ADMIN);
   assert.match(r.data.product.image, /\/api\/images\/\d+$/, 'photo kept');
   assert.equal(r.data.product.status, 'soldout', 'no stock left reads as sold out');
   const served = await worker.fetch(new Request('http://local/api/images/' + photoId), env);
   assert.equal(served.headers.get('Content-Type'), 'image/jpeg');
   assert.equal(new Uint8Array(await served.arrayBuffer()).length, 6);
-  const text = await worker.fetch(new Request('http://local/api/admin/images', { method: 'POST', headers: { 'Content-Type': 'text/html', Authorization: 'Bearer test-token' }, body: '<b>' }), env);
+  const text = await worker.fetch(new Request('http://local/api/admin/images', { method: 'POST', headers: { 'Content-Type': 'text/html', Authorization: 'Bearer ' + ADMIN }, body: '<b>' }), env);
   assert.equal(text.status, 400);
-  assert.equal((await call('DELETE', `/api/admin/products/${pid}`, null, 'test-token')).status, 200);
+  assert.equal((await call('DELETE', `/api/admin/products/${pid}`, null, ADMIN)).status, 200);
   assert.equal((await worker.fetch(new Request('http://local/api/images/' + photoId), env)).status, 404, 'its photo goes with it');
 
   // ---- Categories ----
   r = await call('GET', '/api/products');
   assert.deepEqual(r.data.categories.cat.map((c) => c.slug), ['ring', 'necklace', 'earrings', 'bracelet', 'other']);
-  assert.equal((await call('POST', '/api/admin/categories', { kind: 'cat', name: '戒指' }, 'test-token')).status, 409);
-  r = await call('POST', '/api/admin/categories', { kind: 'cat', name: '胸針' }, 'test-token');
+  assert.equal((await call('POST', '/api/admin/categories', { kind: 'cat', name: '戒指' }, ADMIN)).status, 409);
+  r = await call('POST', '/api/admin/categories', { kind: 'cat', name: '胸針' }, ADMIN);
   assert.equal(r.status, 201);
   const brooch = r.data.categories.cat.find((c) => c.name === '胸針');
-  r = await call('POST', '/api/admin/products', { ...item, name: '貓胸針', cat: brooch.slug }, 'test-token');
+  r = await call('POST', '/api/admin/products', { ...item, name: '貓胸針', cat: brooch.slug }, ADMIN);
   assert.equal(r.status, 201, 'a new category can be used straight away');
-  assert.equal((await call('DELETE', `/api/admin/categories/${brooch.id}`, null, 'test-token')).status, 409, 'still in use');
-  r = await call('PUT', `/api/admin/categories/${brooch.id}`, { name: '別針', sort: 5 }, 'test-token');
+  assert.equal((await call('DELETE', `/api/admin/categories/${brooch.id}`, null, ADMIN)).status, 409, 'still in use');
+  r = await call('PUT', `/api/admin/categories/${brooch.id}`, { name: '別針', sort: 5 }, ADMIN);
   assert.equal(r.data.categories.cat[0].name, '別針', 'renamed and moved to the front');
-  await call('DELETE', `/api/admin/products/${r.data && (await call('GET', '/api/admin/products', null, 'test-token')).data.products.find((p) => p.name === '貓胸針').id}`, null, 'test-token');
-  assert.equal((await call('DELETE', `/api/admin/categories/${brooch.id}`, null, 'test-token')).status, 200);
+  await call('DELETE', `/api/admin/products/${r.data && (await call('GET', '/api/admin/products', null, ADMIN)).data.products.find((p) => p.name === '貓胸針').id}`, null, ADMIN);
+  assert.equal((await call('DELETE', `/api/admin/categories/${brooch.id}`, null, ADMIN)).status, 200);
 
   // ---- Orders ----
-  const mk = async (over) => (await call('POST', '/api/admin/products', { ...item, ...over }, 'test-token')).data.product;
+  const mk = async (over) => (await call('POST', '/api/admin/products', { ...item, ...over }, ADMIN)).data.product;
   const ring = await mk({ name: '現貨戒指', stock: 2, price: 1000 });
   const loose = await mk({ name: '不計庫存', stock: '', price: 500 });
   const bespoke = await mk({ name: '訂製款', supply: 'made', stock: '' });
@@ -214,95 +251,96 @@ if (process.argv[2] === 'serve') {
   assert.equal(r.data.items.length, 2);
 
   assert.equal((await call('GET', '/api/admin/orders')).status, 401);
-  r = await call('GET', '/api/admin/orders', null, 'test-token');
+  r = await call('GET', '/api/admin/orders', null, ADMIN);
   const ord = r.data.orders[0];
   assert.equal(ord.pay_last5, '54321');
-  r = await call('PATCH', `/api/admin/orders/${ord.id}`, { status: 'shipped', tracking: 'A123456789' }, 'test-token');
+  r = await call('PATCH', `/api/admin/orders/${ord.id}`, { status: 'shipped', tracking: 'A123456789' }, ADMIN);
   assert.equal(r.data.order.tracking, 'A123456789');
   assert.equal((await call('POST', '/api/orders/lookup', { code: orderCode, phone: '0911222333' })).data.tracking, 'A123456789');
 
   // Customers: one record per phone, with what they have ordered and booked.
-  r = await call('GET', '/api/admin/customers', null, 'test-token');
+  r = await call('GET', '/api/admin/customers', null, ADMIN);
   const cust = r.data.customers.find((c) => c.phone === '0911222333');
   assert.equal(cust.orders, 1);
   assert.equal(cust.spent, 2560);
   assert.ok(r.data.customers.find((c) => c.phone === person.phone).bookings >= 1, 'bookings create customers too');
-  assert.equal((await call('PUT', '/api/admin/customers/0911222333', { name: '買家', note: '喜歡藍色', tags: 'VIP， 寵物紀念,VIP', birthday: '03-15' }, 'test-token')).status, 200);
-  assert.equal((await call('PUT', '/api/admin/customers/0911222333', { name: '買家', birthday: '13-40' }, 'test-token')).status, 400);
-  r = await call('GET', '/api/admin/customers/0911222333', null, 'test-token');
+  assert.equal((await call('PUT', '/api/admin/customers/0911222333', { name: '買家', note: '喜歡藍色', tags: 'VIP， 寵物紀念,VIP', birthday: '03-15' }, ADMIN)).status, 200);
+  assert.equal((await call('PUT', '/api/admin/customers/0911222333', { name: '買家', birthday: '13-40' }, ADMIN)).status, 400);
+  r = await call('GET', '/api/admin/customers/0911222333', null, ADMIN);
   assert.equal(r.data.customer.note, '喜歡藍色');
   assert.equal(r.data.customer.tags, 'VIP,寵物紀念');
   assert.equal(r.data.points, 25, 'NT$2,500 of goods paid for earns 25 points');
   assert.equal(r.data.orders[0].items.length, 2);
 
   // Cancelling gives the stock back, once, and is final.
-  r = await call('PATCH', `/api/admin/orders/${ord.id}`, { status: 'cancelled' }, 'test-token');
-  await call('PATCH', `/api/admin/orders/${ord.id}`, { status: 'cancelled' }, 'test-token');
-  r = await call('GET', '/api/admin/products', null, 'test-token');
+  r = await call('PATCH', `/api/admin/orders/${ord.id}`, { status: 'cancelled' }, ADMIN);
+  await call('PATCH', `/api/admin/orders/${ord.id}`, { status: 'cancelled' }, ADMIN);
+  r = await call('GET', '/api/admin/products', null, ADMIN);
   assert.equal(r.data.products.find((p) => p.id === ring.id).stock, 2);
   assert.equal(r.data.products.find((p) => p.id === loose.id).stock, null);
-  assert.equal((await call('PATCH', `/api/admin/orders/${ord.id}`, { status: 'paid' }, 'test-token')).status, 400);
+  assert.equal((await call('PATCH', `/api/admin/orders/${ord.id}`, { status: 'paid' }, ADMIN)).status, 400);
 
   // ---- Points ----
-  r = await call('GET', '/api/admin/customers/0911222333', null, 'test-token');
+  r = await call('GET', '/api/admin/customers/0911222333', null, ADMIN);
   assert.equal(r.data.points, 0, 'a cancelled order takes its points back');
-  await call('POST', '/api/admin/customers/0911222333/points', { delta: 300, reason: '體驗課回饋' }, 'test-token');
-  assert.equal((await call('POST', '/api/admin/customers/0911222333/points', { delta: -999 }, 'test-token')).status, 400, 'never below zero');
+  await call('POST', '/api/admin/customers/0911222333/points', { delta: 300, reason: '體驗課回饋' }, ADMIN);
+  assert.equal((await call('POST', '/api/admin/customers/0911222333/points', { delta: -999 }, ADMIN)).status, 400, 'never below zero');
   assert.equal((await call('POST', '/api/points/balance', { phone: '0911222333', code: 'WRONG1' })).status, 404);
   assert.equal((await call('POST', '/api/points/balance', { phone: '0911222333', code: orderCode })).data.points, 300);
   const spend = { ...buyer, shipMethod: 'tn', shipTo: '', items: [{ id: loose.id, qty: 1 }], marketing: true };
   assert.equal((await call('POST', '/api/orders', { ...spend, pointsUse: 100, pointsCode: 'WRONG1' })).status, 400, 'points need proof');
   assert.equal((await call('POST', '/api/orders', { ...spend, items: [{ id: ring.id, qty: 1 }], pointsUse: 5000, pointsCode: orderCode })).status, 409, 'not that many points');
-  r = await call('GET', '/api/admin/products', null, 'test-token');
+  r = await call('GET', '/api/admin/products', null, ADMIN);
   assert.equal(r.data.products.find((p) => p.id === ring.id).stock, 2, 'a refused order leaves the stock alone');
   r = await call('POST', '/api/orders', { ...spend, pointsUse: 300, pointsCode: orderCode });
   assert.equal(r.status, 201);
   assert.equal(r.data.discount, 300);
   assert.equal(r.data.total, 200);
   assert.equal(r.data.willEarn, 2);
-  r = await call('GET', '/api/admin/orders', null, 'test-token');
+  r = await call('GET', '/api/admin/orders', null, ADMIN);
   const second = r.data.orders[0];
-  r = await call('PATCH', `/api/admin/orders/${second.id}`, { status: 'paid' }, 'test-token');
+  r = await call('PATCH', `/api/admin/orders/${second.id}`, { status: 'paid' }, ADMIN);
   assert.equal(r.data.order.points_earned, 2);
-  await call('PATCH', `/api/admin/orders/${second.id}`, { status: 'shipped' }, 'test-token');
-  r = await call('GET', '/api/admin/customers/0911222333', null, 'test-token');
+  await call('PATCH', `/api/admin/orders/${second.id}`, { status: 'shipped' }, ADMIN);
+  r = await call('GET', '/api/admin/customers/0911222333', null, ADMIN);
   assert.equal(r.data.points, 2, 'spent 300, earned 2, and only once');
   assert.equal(r.data.customer.marketing, 1);
-  await call('PATCH', `/api/admin/orders/${second.id}`, { status: 'cancelled' }, 'test-token');
-  assert.equal((await call('GET', '/api/admin/customers/0911222333', null, 'test-token')).data.points, 300, 'cancelling gives the spent points back');
+  await call('PATCH', `/api/admin/orders/${second.id}`, { status: 'cancelled' }, ADMIN);
+  assert.equal((await call('GET', '/api/admin/customers/0911222333', null, ADMIN)).data.points, 300, 'cancelling gives the spent points back');
 
   // Adding a customer by hand, and the report.
-  assert.equal((await call('POST', '/api/admin/customers', { name: '現場客', phone: '0955-000-111', tags: '台南' }, 'test-token')).status, 201);
-  assert.equal((await call('POST', '/api/admin/customers', { name: '現場客', phone: '0955000111' }, 'test-token')).status, 409);
+  assert.equal((await call('POST', '/api/admin/customers', { name: '現場客', phone: '0955-000-111', tags: '台南' }, ADMIN)).status, 201);
+  assert.equal((await call('POST', '/api/admin/customers', { name: '現場客', phone: '0955000111' }, ADMIN)).status, 409);
   assert.equal((await call('GET', '/api/admin/report')).status, 401);
   const third = (await call('POST', '/api/orders', { ...spend, items: [{ id: ring.id, qty: 1 }] })).data;
-  r = await call('GET', '/api/admin/orders', null, 'test-token');
-  await call('PATCH', `/api/admin/orders/${r.data.orders[0].id}`, { status: 'paid' }, 'test-token');
-  r = await call('GET', '/api/admin/report', null, 'test-token');
+  r = await call('GET', '/api/admin/orders', null, ADMIN);
+  await call('PATCH', `/api/admin/orders/${r.data.orders[0].id}`, { status: 'paid' }, ADMIN);
+  r = await call('GET', '/api/admin/report', null, ADMIN);
   assert.equal(r.data.totals.revenue, third.total);
   assert.equal(r.data.totals.paid_orders, 1);
   assert.equal(r.data.top[0].name, '現貨戒指');
-  assert.equal(r.data.months[0].revenue, third.total);
+  // Bookings can fall in next month, so look up this month rather than the newest one.
+  assert.equal(r.data.months.find((m) => m.month === taipeiToday().slice(0, 7)).revenue, third.total);
   assert.ok(r.data.months.some((m) => m.bookings > 0));
 
   // ---- Points rules and class points ----
-  assert.equal((await call('PUT', '/api/admin/settings', { points: { earnPer: 50, pointValue: 0, classPoints: 30 } }, 'test-token')).status, 400);
-  r = await call('PUT', '/api/admin/settings', { points: { earnPer: 50, pointValue: 2, classPoints: 30 } }, 'test-token');
+  assert.equal((await call('PUT', '/api/admin/settings', { points: { earnPer: 50, pointValue: 0, classPoints: 30 } }, ADMIN)).status, 400);
+  r = await call('PUT', '/api/admin/settings', { points: { earnPer: 50, pointValue: 2, classPoints: 30 } }, ADMIN);
   assert.deepEqual(r.data.points, { earnPer: 50, pointValue: 2, classPoints: 30, expireMonths: 0 });
   assert.equal((await call('GET', '/api/products')).data.points.earnPer, 50);
-  assert.equal((await call('GET', '/api/admin/bookings', null, 'test-token')).data.settings.notify_emails, 'boss@example.com,staff@example.com', 'saving rules leaves the recipients alone');
+  assert.equal((await call('GET', '/api/admin/bookings', null, ADMIN)).data.settings.notify_emails, 'boss@example.com,staff@example.com', 'saving rules leaves the recipients alone');
   const classDay = nextDate('tn', 30);
   r = await call('POST', '/api/bookings', { ...person, date: classDay, time: '13:30', phone: '0977000111', name: '學員' });
   const classCode = r.data.code;
-  r = await call('GET', '/api/admin/bookings', null, 'test-token');
+  r = await call('GET', '/api/admin/bookings', null, ADMIN);
   const classBooking = r.data.bookings.find((b) => b.code === classCode);
-  await call('PATCH', `/api/admin/bookings/${classBooking.id}`, { status: 'confirmed' }, 'test-token');
-  await call('PATCH', `/api/admin/bookings/${classBooking.id}`, { status: 'confirmed' }, 'test-token');
+  await call('PATCH', `/api/admin/bookings/${classBooking.id}`, { status: 'confirmed' }, ADMIN);
+  await call('PATCH', `/api/admin/bookings/${classBooking.id}`, { status: 'confirmed' }, ADMIN);
   assert.equal((await call('POST', '/api/points/balance', { phone: '0977000111', code: classCode })).data.points, 30, 'class points once, and a booking code proves who you are');
-  await call('PATCH', `/api/admin/bookings/${classBooking.id}`, { status: 'cancelled' }, 'test-token');
-  assert.equal((await call('GET', '/api/admin/customers/0977000111', null, 'test-token')).data.points, 0);
+  await call('PATCH', `/api/admin/bookings/${classBooking.id}`, { status: 'cancelled' }, ADMIN);
+  assert.equal((await call('GET', '/api/admin/customers/0977000111', null, ADMIN)).data.points, 0);
   assert.equal((await call('GET', '/api/admin/points')).status, 401);
-  r = await call('GET', '/api/admin/points', null, 'test-token');
+  r = await call('GET', '/api/admin/points', null, ADMIN);
   assert.equal(r.data.totals.outstanding, r.data.totals.issued - r.data.totals.used);
   assert.ok(r.data.ledger.length > 5 && r.data.ledger[0].name);
   assert.equal(r.data.top[0].phone, '0911222333');
@@ -316,7 +354,7 @@ if (process.argv[2] === 'serve') {
     return { status: res.status, data: await res.json() };
   };
   assert.equal((await call('POST', '/api/admin/login', { username: '', password: 'wrong' })).status, 401);
-  r = await call('POST', '/api/admin/login', { username: '', password: 'test-token' });
+  r = await signIn('', 'test-token');
   assert.equal(r.data.role, 'owner');
   const ownerToken = r.data.token;
   assert.equal((await call('GET', '/api/admin/me', null, ownerToken)).data.master, true);
@@ -324,7 +362,7 @@ if (process.argv[2] === 'serve') {
   assert.equal((await call('POST', '/api/admin/staff', { username: 'mei', name: '小美', role: 'staff', password: 'correct-horse' }, ownerToken)).status, 201);
   assert.equal((await call('POST', '/api/admin/staff', { username: 'mei', name: '另一位', role: 'staff', password: 'correct-horse' }, ownerToken)).status, 409);
   assert.equal((await call('POST', '/api/admin/login', { username: 'mei', password: 'nope-nope' })).status, 401);
-  r = await call('POST', '/api/admin/login', { username: 'Mei', password: 'correct-horse' });
+  r = await signIn('Mei', 'correct-horse');
   const staffToken = r.data.token;
   assert.equal(r.data.role, 'staff');
   assert.equal((await call('GET', '/api/admin/orders', null, staffToken)).status, 200, 'staff run the day-to-day pages');
@@ -334,7 +372,7 @@ if (process.argv[2] === 'serve') {
   assert.equal((await call('PUT', '/api/admin/settings', { notify_emails: '' }, staffToken)).status, 403);
   assert.equal((await call('PUT', '/api/admin/password', { current: 'wrong', next: 'new-password-1' }, staffToken)).status, 400);
   assert.equal((await call('PUT', '/api/admin/password', { current: 'correct-horse', next: 'new-password-1' }, staffToken)).status, 200);
-  assert.equal((await call('POST', '/api/admin/login', { username: 'mei', password: 'new-password-1' })).status, 200);
+  assert.equal((await signIn('mei', 'new-password-1')).status, 200);
   await call('POST', '/api/admin/closures', { studio: 'kh', date: nextDate('kh', 40), reason: '進修' }, staffToken);
   r = await call('GET', '/api/admin/audit', null, ownerToken);
   assert.equal(r.data.audit[0].action, '新增休息日');
@@ -347,27 +385,67 @@ if (process.argv[2] === 'serve') {
   await call('POST', '/api/admin/logout', null, ownerToken);
   assert.equal((await call('GET', '/api/admin/me', null, ownerToken)).status, 401);
 
+  // ---- Two-step sign-in ----
+  assert.equal(otp('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', 59000), '287082', 'the test helper agrees with RFC 6238');
+  assert.equal((await call('GET', '/api/admin/orders', null, 'test-token')).status, 401, 'the master password is no longer an API key');
+  await call('POST', '/api/admin/staff', { username: 'kai', name: '阿凱', role: 'staff', password: 'kai-password' }, ADMIN);
+  const kai = (extra) => call('POST', '/api/admin/login', { username: 'kai', password: 'kai-password', ...extra });
+  r = await kai({});
+  assert.ok(r.status === 401 && !r.data.token && /^[A-Z2-7]{32}$/.test(r.data.setup), 'a password alone only starts the set-up');
+  const kaiKey = r.data.setup;
+  r = await kai({ secret: kaiKey, code: wrong(otp(kaiKey)) });
+  assert.ok(r.status === 401 && r.data.setup === kaiKey && !r.data.token, 'a wrong code does not finish the set-up');
+  skew += 30000;
+  r = await kai({ secret: kaiKey, code: otp(kaiKey) });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.backupCodes.length, 10);
+  const kaiBackup = r.data.backupCodes;
+  assert.equal((await kai({ code: otp(kaiKey) })).status, 401, 'a code works once');
+  r = await kai({});
+  assert.ok(r.status === 401 && r.data.needCode && !r.data.token, 'once set up, the password alone is not enough');
+  assert.equal((await kai({ code: wrong(otp(kaiKey)) })).status, 401);
+  assert.equal((await kai({ code: kaiBackup[0].toLowerCase() })).status, 200, 'a backup code stands in for the code');
+  assert.equal((await kai({ code: kaiBackup[0] })).status, 401, 'a backup code works once');
+  r = await call('GET', '/api/admin/audit', null, ADMIN);
+  assert.equal(r.data.audit.find((a) => a.staff_name === '阿凱').detail, '使用備用碼');
+  // Five wrong codes in one 15-minute block lock the account, right code or not.
+  skew += 900000 - (Date.now() % 900000) + 1000;
+  for (let i = 0; i < 5; i++) assert.equal((await kai({ code: wrong(otp(kaiKey)) })).status, 401);
+  assert.equal((await kai({ code: otp(kaiKey) })).status, 429);
+  skew += 900000;
+  r = await kai({ code: otp(kaiKey) });
+  assert.equal(r.status, 200, 'the lock lifts after 15 minutes');
+  const kaiToken = r.data.token;
+  // The owner resets someone's 2FA (a new phone): signed out, and set up again next time.
+  const kaiRow = (await call('GET', '/api/admin/staff', null, ADMIN)).data.staff.find((m) => m.username === 'kai');
+  assert.ok(!('mfa' in kaiRow), 'the 2FA record is never sent out');
+  assert.equal((await call('PUT', `/api/admin/staff/${kaiRow.id}`, { username: 'kai', name: '阿凱', role: 'staff', resetMfa: true }, ADMIN)).status, 200);
+  assert.equal((await call('GET', '/api/admin/me', null, kaiToken)).status, 401);
+  assert.ok((await kai({})).data.setup);
+  const backup = JSON.stringify((await call('GET', '/api/admin/backup', null, ADMIN)).data);
+  assert.ok(!backup.includes(keys['']) && !backup.includes('master_mfa'), 'the master 2FA key stays out of backups');
+
   // ---- Too many attempts from one address ----
   let last;
   for (let i = 0; i < 11; i++) last = await as('POST', '/api/admin/login', { username: 'x', password: 'y' }, null, '203.0.113.9');
   assert.equal(last.status, 429);
-  assert.equal((await as('POST', '/api/admin/login', { username: '', password: 'test-token' }, null, '203.0.113.10')).status, 200, 'other visitors are unaffected');
+  assert.equal((await signIn('', 'test-token', '203.0.113.10')).status, 200, 'other visitors are unaffected');
 
   // ---- Options, sale price, promo codes, free shipping ----
-  await call('PUT', '/api/admin/settings', { points: { earnPer: 100, pointValue: 1, classPoints: 0 } }, 'test-token');
-  assert.equal((await call('POST', '/api/admin/products', { ...item, name: '特價戒', price: 2000, salePrice: 2500 }, 'test-token')).status, 400);
+  await call('PUT', '/api/admin/settings', { points: { earnPer: 100, pointValue: 1, classPoints: 0 } }, ADMIN);
+  assert.equal((await call('POST', '/api/admin/products', { ...item, name: '特價戒', price: 2000, salePrice: 2500 }, ADMIN)).status, 400);
   const sized = (await call('POST', '/api/admin/products', { ...item, name: '特價戒', price: 2000, salePrice: 1500, stock: 5, description: '手工拋光',
-    options: [{ name: '戒圍', values: ['10', '11', '12'] }] }, 'test-token')).data.product;
+    options: [{ name: '戒圍', values: ['10', '11', '12'] }] }, ADMIN)).data.product;
   assert.equal(sized.priceNow, 1500);
   assert.deepEqual(sized.options, [{ name: '戒圍', values: ['10', '11', '12'] }]);
   const shopper = { name: '新客', phone: '0933000111', email: 'new@example.com', shipMethod: 'store', shipTo: '成大門市' };
   assert.equal((await call('POST', '/api/orders', { ...shopper, items: [{ id: sized.id, qty: 1 }] })).status, 400, 'a size must be chosen');
   assert.equal((await call('POST', '/api/orders', { ...shopper, items: [{ id: sized.id, qty: 1, options: { 戒圍: '99' } }] })).status, 400);
-  assert.equal((await call('POST', '/api/admin/promos', { code: 'hi', kind: 'percent', value: 10 }, 'test-token')).status, 400);
-  assert.equal((await call('POST', '/api/admin/promos', { code: 'open10', kind: 'percent', value: 10, minSpend: 2000, maxUses: 1 }, 'test-token')).status, 201);
+  assert.equal((await call('POST', '/api/admin/promos', { code: 'hi', kind: 'percent', value: 10 }, ADMIN)).status, 400);
+  assert.equal((await call('POST', '/api/admin/promos', { code: 'open10', kind: 'percent', value: 10, minSpend: 2000, maxUses: 1 }, ADMIN)).status, 201);
   assert.equal((await call('POST', '/api/promos/check', { code: 'OPEN10', subtotal: 1500 })).status, 404, 'below the minimum spend');
   assert.equal((await call('POST', '/api/promos/check', { code: 'open10', subtotal: 3000 })).data.discount, 300);
-  await call('PUT', '/api/admin/settings', { shop: { bankInfo: '測試銀行 123', freeShipOver: 2500, customerEmails: true } }, 'test-token');
+  await call('PUT', '/api/admin/settings', { shop: { bankInfo: '測試銀行 123', freeShipOver: 2500, customerEmails: true } }, ADMIN);
   r = await call('GET', '/api/products');
   assert.equal(r.data.freeShipOver, 2500);
   assert.equal(r.data.bankInfo, '測試銀行 123');
@@ -401,25 +479,25 @@ if (process.argv[2] === 'serve') {
   assert.match(mail.customer.body, /測試銀行 123/);
   assert.match(mail.customer.body, /https:\/\/shop\.example\/cart\.html#lookup/);
   assert.equal((await post('POST', '/api/orders', { ...shopper, promo: 'OPEN10', items: [{ id: sized.id, qty: 2, options: { 戒圍: '10' } }] })).status, 400, 'the code had one use');
-  r = await call('GET', '/api/admin/products', null, 'test-token');
+  r = await call('GET', '/api/admin/products', null, ADMIN);
   assert.equal(r.data.products.find((p) => p.id === sized.id).stock, 3, 'a refused order leaves stock alone');
-  r = await call('GET', '/api/admin/orders', null, 'test-token');
+  r = await call('GET', '/api/admin/orders', null, ADMIN);
   const promoOrder = r.data.orders[0];
   assert.equal(promoOrder.items[0].options, '戒圍:11');
   sentMail.length = 0;
-  await post('PATCH', `/api/admin/orders/${promoOrder.id}`, { status: 'shipped', tracking: 'Z999' }, 'test-token');
+  await post('PATCH', `/api/admin/orders/${promoOrder.id}`, { status: 'shipped', tracking: 'Z999' }, ADMIN);
   mail = sentMail.pop();
   assert.match(mail.customer.subject, /已出貨/);
   assert.match(mail.customer.body, /Z999/);
-  await post('PATCH', `/api/admin/orders/${promoOrder.id}`, { status: 'cancelled' }, 'test-token');
-  assert.equal((await call('GET', '/api/admin/promos', null, 'test-token')).data.promos[0].used, 0, 'cancelling frees the code');
+  await post('PATCH', `/api/admin/orders/${promoOrder.id}`, { status: 'cancelled' }, ADMIN);
+  assert.equal((await call('GET', '/api/admin/promos', null, ADMIN)).data.promos[0].used, 0, 'cancelling frees the code');
   // Customers can be left alone: no customer email once the owner switches them off.
-  await call('PUT', '/api/admin/settings', { shop: { bankInfo: '', freeShipOver: 0, customerEmails: false } }, 'test-token');
+  await call('PUT', '/api/admin/settings', { shop: { bankInfo: '', freeShipOver: 0, customerEmails: false } }, ADMIN);
   sentMail.length = 0;
   await post('POST', '/api/orders', { ...shopper, shipMethod: 'tn', shipTo: '', items: [{ id: sized.id, qty: 1, options: { 戒圍: '10' } }] });
   assert.equal(sentMail.pop().customer, undefined);
   // Booking confirmations go to the email given with the booking.
-  await call('PUT', '/api/admin/settings', { shop: { bankInfo: '', freeShipOver: 0, customerEmails: true } }, 'test-token');
+  await call('PUT', '/api/admin/settings', { shop: { bankInfo: '', freeShipOver: 0, customerEmails: true } }, ADMIN);
   sentMail.length = 0;
   await post('POST', '/api/bookings', { ...person, date: nextDate('tn', 44), time: '13:30', type: 'visit', email: 'guest@example.com' });
   mail = sentMail.pop();
@@ -434,13 +512,13 @@ if (process.argv[2] === 'serve') {
 
   // ---- Points that run out ----
   sqlite.prepare("UPDATE points SET created_at = '2020-01-01T00:00:00.000Z' WHERE phone = '0911222333'").run();
-  await call('PUT', '/api/admin/settings', { points: { earnPer: 100, pointValue: 1, classPoints: 0, expireMonths: 12 } }, 'test-token');
-  r = await call('GET', '/api/admin/customers/0911222333', null, 'test-token');
+  await call('PUT', '/api/admin/settings', { points: { earnPer: 100, pointValue: 1, classPoints: 0, expireMonths: 12 } }, ADMIN);
+  r = await call('GET', '/api/admin/customers/0911222333', null, ADMIN);
   assert.equal(r.data.points, 0);
   assert.match(r.data.ledger[0].reason, /積分到期/);
 
   // ---- Backup ----
-  r = await call('GET', '/api/admin/backup', null, 'test-token');
+  r = await call('GET', '/api/admin/backup', null, ADMIN);
   assert.ok(r.data.tables.orders.length > 3 && r.data.tables.customers.length > 2);
   assert.equal(r.data.tables.staff, undefined, 'sign-in data stays out of the backup');
 
